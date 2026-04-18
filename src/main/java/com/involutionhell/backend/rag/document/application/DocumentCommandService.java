@@ -1,0 +1,326 @@
+package com.involutionhell.backend.rag.document.application;
+
+import com.involutionhell.backend.rag.document.api.*;
+import com.involutionhell.backend.rag.document.persistence.RagDocumentRecord;
+import com.involutionhell.backend.rag.document.persistence.RagDocumentRepository;
+import com.involutionhell.backend.rag.shared.markdown.MarkdownDocumentParser;
+import com.involutionhell.backend.rag.shared.model.RagDocumentStatus;
+import com.involutionhell.backend.rag.shared.support.RagLogHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+@Service
+class DocumentCommandService implements DocumentCommandFacade {
+
+    private static final Logger log = LoggerFactory.getLogger(DocumentCommandService.class);
+
+    private final RagDocumentRepository documentRepository;
+    private final DocumentQueryFacade documentQueryFacade;
+    private final ApplicationEventPublisher eventPublisher;
+    private final MarkdownDocumentParser markdownDocumentParser;
+
+    DocumentCommandService(
+            RagDocumentRepository documentRepository,
+            DocumentQueryFacade documentQueryFacade,
+            ApplicationEventPublisher eventPublisher,
+            MarkdownDocumentParser markdownDocumentParser
+    ) {
+        this.documentRepository = documentRepository;
+        this.documentQueryFacade = documentQueryFacade;
+        this.eventPublisher = eventPublisher;
+        this.markdownDocumentParser = markdownDocumentParser;
+    }
+
+    @Override
+    @Transactional
+    public RagDocumentView createDocument(RagDocumentCreateRequest request) {
+        PreparedDocument prepared = prepareDocument(
+                request.sourceType(),
+                request.sourceUri(),
+                request.externalRef(),
+                request.title(),
+                request.content(),
+                request.metadata()
+        );
+        RagDocumentRecord record = documentRepository.save(
+                prepared.sourceType(),
+                prepared.sourceUri(),
+                prepared.externalRef(),
+                prepared.title(),
+                prepared.content(),
+                prepared.contentSha256(),
+                prepared.metadata()
+        );
+        logCreate(record, prepared);
+        queueAndPublish(record.id(), record.contentSha256());
+        return documentQueryFacade.getDocument(record.id());
+    }
+
+    @Override
+    @Transactional
+    public RagDocumentView createDocument(
+            MultipartFile file,
+            String sourceType,
+            String sourceUri,
+            String externalRef,
+            String title,
+            Map<String, Object> metadata
+    ) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("上传文件不能为空");
+        }
+
+        String originalFilename = resolveOriginalFilename(file);
+        String content;
+        try {
+            content = new String(file.getBytes(), StandardCharsets.UTF_8);
+        } catch (Exception exception) {
+            throw new IllegalStateException("读取上传文件失败", exception);
+        }
+
+        Map<String, Object> uploadMetadata = metadata == null ? new LinkedHashMap<>() : new LinkedHashMap<>(metadata);
+        if (StringUtils.hasText(originalFilename)) {
+            uploadMetadata.putIfAbsent("originalFilename", originalFilename);
+        }
+        if (StringUtils.hasText(file.getContentType())) {
+            uploadMetadata.putIfAbsent("contentType", file.getContentType());
+        }
+        uploadMetadata.putIfAbsent("uploadMode", "multipart");
+
+        logUpload(file, originalFilename, sourceType, sourceUri, title);
+
+        return createDocument(new RagDocumentCreateRequest(
+                StringUtils.hasText(sourceType) ? sourceType : "markdown",
+                StringUtils.hasText(sourceUri) ? sourceUri : defaultSourceUri(originalFilename),
+                trimToNull(externalRef),
+                StringUtils.hasText(title) ? title.trim() : defaultTitle(originalFilename),
+                content,
+                uploadMetadata
+        ));
+    }
+
+    @Override
+    @Transactional
+    public RagDocumentView updateDocument(Long documentId, RagDocumentUpdateRequest request) {
+        requireMutableDocument(documentId);
+        PreparedDocument prepared = prepareDocument(
+                request.sourceType(),
+                request.sourceUri(),
+                request.externalRef(),
+                request.title(),
+                request.content(),
+                request.metadata()
+        );
+        documentRepository.update(
+                documentId,
+                prepared.sourceType(),
+                prepared.sourceUri(),
+                prepared.externalRef(),
+                prepared.title(),
+                prepared.content(),
+                prepared.contentSha256(),
+                prepared.metadata()
+        );
+        logUpdate(documentId, prepared);
+        queueAndPublish(documentId, prepared.contentSha256());
+        return documentQueryFacade.getDocument(documentId);
+    }
+
+    @Override
+    @Transactional
+    public RagDocumentView reindexDocument(Long documentId) {
+        RagDocumentRecord record = requireMutableDocument(documentId);
+        documentRepository.markPending(documentId);
+        logReindex(documentId, record.contentSha256());
+        queueAndPublish(documentId, record.contentSha256());
+        return documentQueryFacade.getDocument(documentId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteDocument(Long documentId) {
+        RagDocumentRecord document = requireDocument(documentId);
+        if (RagDocumentStatus.DELETING.name().equals(document.status())) {
+            log.info("RAG delete ignored because document is already deleting: documentId={}", documentId);
+            return;
+        }
+        log.info(
+                "RAG document marked deleting: documentId={}, contentSha={}",
+                documentId,
+                RagLogHelper.shortSha(document.contentSha256())
+        );
+        documentRepository.markDeleting(documentId, "文档删除已受理，等待完成向量与切片清理");
+        eventPublisher.publishEvent(new DocumentIndexCleanupRequestedEvent(documentId));
+    }
+
+    private RagDocumentRecord requireDocument(Long documentId) {
+        return documentRepository.findById(documentId)
+                .orElseThrow(() -> new IllegalArgumentException("RAG 文档不存在: " + documentId));
+    }
+
+    private RagDocumentRecord requireMutableDocument(Long documentId) {
+        RagDocumentRecord record = requireDocument(documentId);
+        if (RagDocumentStatus.DELETING.name().equals(record.status())) {
+            throw new IllegalStateException("RAG 文档正在删除，暂时不能修改或重建索引: " + documentId);
+        }
+        return record;
+    }
+
+    private void queueAndPublish(Long documentId, String contentSha256) {
+        eventPublisher.publishEvent(new DocumentIndexRequestedEvent(
+                documentId,
+                contentSha256,
+                "document-command-service"
+        ));
+    }
+
+    private PreparedDocument prepareDocument(
+            String sourceType,
+            String sourceUri,
+            String externalRef,
+            String title,
+            String content,
+            Map<String, Object> metadata
+    ) {
+        String normalizedContent = content == null ? null : content.trim();
+        if (!StringUtils.hasText(normalizedContent)) {
+            throw new IllegalArgumentException("文档内容不能为空");
+        }
+
+        return new PreparedDocument(
+                normalize(sourceType),
+                trimToNull(sourceUri),
+                trimToNull(externalRef),
+                trimToNull(title),
+                normalizedContent,
+                sha256Hex(normalizedContent),
+                enrichMetadata(metadata, normalizedContent)
+        );
+    }
+
+    private Map<String, Object> enrichMetadata(Map<String, Object> metadata, String content) {
+        Map<String, Object> enriched = new LinkedHashMap<>();
+        if (metadata != null) {
+            enriched.putAll(metadata);
+        }
+
+        MarkdownDocumentParser.MarkdownDocument markdownDocument = markdownDocumentParser.parse(content);
+        if (!enriched.containsKey("format")) {
+            enriched.put("format", "markdown");
+        }
+        if (!markdownDocument.frontmatter().isEmpty()) {
+            enriched.put("frontmatter", markdownDocument.frontmatter());
+        }
+        return enriched;
+    }
+
+    private String resolveOriginalFilename(MultipartFile file) {
+        String originalFilename = trimToNull(StringUtils.cleanPath(file.getOriginalFilename()));
+        if (!StringUtils.hasText(originalFilename)) {
+            return "uploaded-document.md";
+        }
+        int lastSlash = Math.max(originalFilename.lastIndexOf('/'), originalFilename.lastIndexOf('\\'));
+        return lastSlash >= 0 ? originalFilename.substring(lastSlash + 1) : originalFilename;
+    }
+
+    private String defaultSourceUri(String originalFilename) {
+        return "upload/" + originalFilename;
+    }
+
+    private String defaultTitle(String originalFilename) {
+        int dotIndex = originalFilename.lastIndexOf('.');
+        if (dotIndex <= 0) {
+            return originalFilename;
+        }
+        return originalFilename.substring(0, dotIndex);
+    }
+
+    private String normalize(String value) {
+        if (!StringUtils.hasText(value)) {
+            return value;
+        }
+        return value.trim().toLowerCase();
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private String sha256Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 不可用", exception);
+        }
+    }
+
+    private void logCreate(RagDocumentRecord record, PreparedDocument prepared) {
+        log.info(
+                "RAG document created: documentId={}, contentSha={}, sourceType={}, sourceUri={}, title={}, contentLength={}",
+                record.id(),
+                RagLogHelper.shortSha(prepared.contentSha256()),
+                prepared.sourceType(),
+                prepared.sourceUri(),
+                prepared.title(),
+                prepared.content().length()
+        );
+    }
+
+    private void logUpdate(Long documentId, PreparedDocument prepared) {
+        log.info(
+                "RAG document updated: documentId={}, contentSha={}, sourceType={}, sourceUri={}, title={}, contentLength={}",
+                documentId,
+                RagLogHelper.shortSha(prepared.contentSha256()),
+                prepared.sourceType(),
+                prepared.sourceUri(),
+                prepared.title(),
+                prepared.content().length()
+        );
+    }
+
+    private void logUpload(MultipartFile file, String originalFilename, String sourceType, String sourceUri, String title) {
+        log.info(
+                "RAG upload received: filename={}, sourceType={}, sourceUri={}, title={}, size={}",
+                originalFilename,
+                StringUtils.hasText(sourceType) ? sourceType : "markdown",
+                StringUtils.hasText(sourceUri) ? sourceUri : defaultSourceUri(originalFilename),
+                StringUtils.hasText(title) ? title.trim() : defaultTitle(originalFilename),
+                file.getSize()
+        );
+    }
+
+    private void logReindex(Long documentId, String contentSha256) {
+        log.info(
+                "RAG reindex requested: documentId={}, contentSha={}",
+                documentId,
+                RagLogHelper.shortSha(contentSha256)
+        );
+    }
+
+    private record PreparedDocument(
+            String sourceType,
+            String sourceUri,
+            String externalRef,
+            String title,
+            String content,
+            String contentSha256,
+            Map<String, Object> metadata
+    ) {
+    }
+}

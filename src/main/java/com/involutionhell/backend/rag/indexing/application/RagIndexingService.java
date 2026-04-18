@@ -1,0 +1,821 @@
+package com.involutionhell.backend.rag.indexing.application;
+
+import com.involutionhell.backend.rag.indexing.model.RagChunkDraft;
+import com.involutionhell.backend.rag.indexing.model.RagIndexAttemptException;
+import com.involutionhell.backend.rag.indexing.model.RagIndexFailure;
+import com.involutionhell.backend.rag.indexing.model.RagIndexStage;
+import com.involutionhell.backend.rag.indexing.model.RagTextChunk;
+import com.involutionhell.backend.rag.document.spi.DocumentIndexingSpi;
+import com.involutionhell.backend.rag.document.spi.DocumentIndexingView;
+import com.involutionhell.backend.rag.indexing.service.RagIndexingFailureClassifier;
+import com.involutionhell.backend.rag.indexing.service.RagIndexingMetrics;
+import com.involutionhell.backend.rag.indexing.service.RagMilvusVectorIndexer;
+import com.involutionhell.backend.rag.indexing.service.RagTextChunker;
+import com.involutionhell.backend.rag.shared.properties.RagProperties;
+import com.involutionhell.backend.rag.indexing.persistence.RagChunkRepository;
+import com.involutionhell.backend.rag.indexing.persistence.RagChunkRecord;
+import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRepository;
+import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobTransitionRepository;
+import com.involutionhell.backend.rag.indexing.persistence.RagIndexOutboxRepository;
+import com.involutionhell.backend.rag.shared.metadata.RagChunkMetadataHelper;
+import com.involutionhell.backend.rag.shared.model.RagDocumentStatus;
+import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowCommand;
+import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowService;
+import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowState;
+import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowTriggerType;
+import com.involutionhell.backend.rag.shared.support.RagJsonCodec;
+import com.involutionhell.backend.rag.shared.support.RagLogHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.stereotype.Service;
+
+import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * 负责将原始文档切片并写入 PostgreSQL / Milvus。
+ */
+@Service
+public class RagIndexingService {
+
+    private static final Logger log = LoggerFactory.getLogger(RagIndexingService.class);
+
+    private final DocumentIndexingSpi documentIndexingSpi;
+    private final RagChunkRepository chunkRepository;
+    private final RagTextChunker chunker;
+    private final ObjectProvider<VectorStore> vectorStoreProvider;
+    private final ObjectProvider<RagMilvusVectorIndexer> milvusVectorIndexerProvider;
+    private final RagIndexJobRepository indexJobRepository;
+    private final RagIndexOutboxRepository indexOutboxRepository;
+    private final RagIndexJobTransitionRepository indexJobTransitionRepository;
+    private final IndexWorkflowService workflowService;
+    private final RagJsonCodec jsonCodec;
+    private final RagProperties ragProperties;
+    private final RagIndexingFailureClassifier failureClassifier;
+    private final RagIndexingMetrics indexingMetrics;
+    private final RagChunkMetadataHelper metadataHelper;
+
+    public RagIndexingService(
+            DocumentIndexingSpi documentIndexingSpi,
+            RagChunkRepository chunkRepository,
+            RagTextChunker chunker,
+            ObjectProvider<VectorStore> vectorStoreProvider,
+            ObjectProvider<RagMilvusVectorIndexer> milvusVectorIndexerProvider,
+            RagIndexJobRepository indexJobRepository,
+            RagIndexOutboxRepository indexOutboxRepository,
+            RagIndexJobTransitionRepository indexJobTransitionRepository,
+            IndexWorkflowService workflowService,
+            RagJsonCodec jsonCodec,
+            RagProperties ragProperties,
+            RagIndexingFailureClassifier failureClassifier,
+            RagIndexingMetrics indexingMetrics,
+            RagChunkMetadataHelper metadataHelper
+    ) {
+        this.documentIndexingSpi = documentIndexingSpi;
+        this.chunkRepository = chunkRepository;
+        this.chunker = chunker;
+        this.vectorStoreProvider = vectorStoreProvider;
+        this.milvusVectorIndexerProvider = milvusVectorIndexerProvider;
+        this.indexJobRepository = indexJobRepository;
+        this.indexOutboxRepository = indexOutboxRepository;
+        this.indexJobTransitionRepository = indexJobTransitionRepository;
+        this.workflowService = workflowService;
+        this.jsonCodec = jsonCodec;
+        this.ragProperties = ragProperties;
+        this.failureClassifier = failureClassifier;
+        this.indexingMetrics = indexingMetrics;
+        this.metadataHelper = metadataHelper;
+    }
+
+    /**
+     * 对指定文档执行切片与向量索引。
+     */
+    public void indexDocument(Long documentId) {
+        indexDocument(
+                documentId,
+                null,
+                IndexWorkflowCommand.of(documentId, null, IndexWorkflowTriggerType.SYSTEM, "indexing-service")
+        );
+    }
+
+    /**
+     * 对指定文档执行切片与向量索引；如果传入预期版本且与当前文档不一致，则直接丢弃旧任务。
+     */
+    public void indexDocument(Long documentId, String expectedContentSha256) {
+        indexDocument(
+                documentId,
+                expectedContentSha256,
+                IndexWorkflowCommand.of(
+                        documentId,
+                        expectedContentSha256,
+                        IndexWorkflowTriggerType.SYSTEM,
+                        "indexing-service"
+                )
+        );
+    }
+
+    /**
+     * 使用指定工作流上下文执行一次索引尝试。
+     */
+    public void indexDocument(Long documentId, String expectedContentSha256, IndexWorkflowCommand workflowCommand) {
+        DocumentIndexingView document = loadDocument(documentId);
+        long startedAt = System.nanoTime();
+        long targetGeneration = nextIndexGeneration(document);
+        AtomicReference<IndexWorkflowState> currentState = new AtomicReference<>(IndexWorkflowState.DISPATCHING);
+        AtomicBoolean vectorWriteApplied = new AtomicBoolean(false);
+        log.info(
+                "RAG indexing started: documentId={}, contentSha={}, targetGeneration={}, currentGeneration={}, hasExpectedVersion={}, triggerType={}, triggeredBy={}",
+                documentId,
+                RagLogHelper.shortSha(document.contentSha256()),
+                targetGeneration,
+                document.indexedGeneration(),
+                expectedContentSha256 != null && !expectedContentSha256.isBlank(),
+                workflowCommand.triggerType(),
+                workflowCommand.triggeredBy()
+        );
+
+        try {
+            validateIndexableDocument(document, expectedContentSha256, false);
+            String currentContentSha256 = document.contentSha256();
+            IndexWorkflowCommand attemptCommand = workflowCommand
+                    .withTargetGeneration(targetGeneration)
+                    .withMetadata("currentGeneration", document.indexedGeneration());
+            workflowService.startAttempt(attemptCommand);
+            currentState.set(IndexWorkflowState.PREPARING);
+            int chunkCount = indexDocumentOnce(documentId, document, targetGeneration, attemptCommand, currentState, vectorWriteApplied);
+            indexingMetrics.recordIndexSuccess(chunkCount, Duration.ofNanos(System.nanoTime() - startedAt));
+            log.info(
+                    "RAG indexing completed: documentId={}, contentSha={}, targetGeneration={}, chunkCount={}, elapsedMs={}",
+                    documentId,
+                    RagLogHelper.shortSha(document.contentSha256()),
+                    targetGeneration,
+                    chunkCount,
+                    Duration.ofNanos(System.nanoTime() - startedAt).toMillis()
+            );
+        } catch (SkippedIndexingException exception) {
+            if (exception.requiresCleanup()) {
+                cleanupFailedGenerationSafely(documentId, targetGeneration, document.indexedGeneration(), vectorWriteApplied.get());
+            }
+            if (exception.contentSha256() != null) {
+                workflowService.skip(
+                        workflowCommand
+                                .withNote(exception.reason())
+                                .withFailure("skipped", exception.reason())
+                );
+            }
+            log.info(
+                    "RAG indexing skipped: documentId={}, contentSha={}, reason={}, requiresCleanup={}",
+                    documentId,
+                    RagLogHelper.shortSha(exception.contentSha256()),
+                    exception.reason(),
+                    exception.requiresCleanup()
+            );
+        } catch (IllegalArgumentException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            RagIndexFailure failure = failureClassifier.classify(exception);
+            String errorMessage = buildFailureMessage(exception, failure.reason());
+            cleanupFailedGenerationSafely(documentId, targetGeneration, document.indexedGeneration(), vectorWriteApplied.get());
+
+            if (failure.retryable()) {
+                log.warn(
+                        "RAG indexing failed with recoverable error: documentId={}, contentSha={}, stage={}, reason={}, error={}",
+                        documentId,
+                        RagLogHelper.shortSha(document.contentSha256()),
+                        currentState.get(),
+                        failure.reason(),
+                        RagLogHelper.errorSummary(exception)
+                );
+                indexingMetrics.recordRetry(failure.reason());
+            } else {
+                log.error(
+                        "RAG indexing failed permanently: documentId={}, contentSha={}, stage={}, reason={}, error={}",
+                        documentId,
+                        RagLogHelper.shortSha(document.contentSha256()),
+                        currentState.get(),
+                        failure.reason(),
+                        RagLogHelper.errorSummary(exception)
+                );
+                indexingMetrics.recordFailure(failure.reason(), false);
+            }
+
+            throw new RagIndexAttemptException(
+                    toRagIndexStage(currentState.get()),
+                    failure.retryable(),
+                    failure.reason(),
+                    errorMessage,
+                    exception
+            );
+        }
+    }
+
+    /**
+     * 删除指定文档已有的切片和向量索引，供删除文档或重建前清理使用。
+     */
+    public void deleteDocumentIndex(Long documentId) {
+        deleteDocumentIndex(documentId, currentVectorStore(), currentMilvusVectorIndexer());
+    }
+
+    /**
+     * 清理文档已经不存在时，索引模块内部可能遗留的孤儿状态。
+     */
+    public void deleteOrphanedIndexingState(Long documentId) {
+        deleteDocumentIndex(documentId);
+        indexOutboxRepository.deleteByDocumentId(documentId);
+        indexJobTransitionRepository.deleteByDocumentId(documentId);
+        indexJobRepository.deleteByDocumentId(documentId);
+    }
+
+    private int indexDocumentOnce(
+            Long documentId,
+            DocumentIndexingView document,
+            long indexGeneration,
+            IndexWorkflowCommand workflowCommand,
+            AtomicReference<IndexWorkflowState> currentState,
+            AtomicBoolean vectorWriteApplied
+    ) {
+        VectorStore vectorStore = currentVectorStore();
+        RagMilvusVectorIndexer milvusVectorIndexer = currentMilvusVectorIndexer();
+        Long previousActiveGeneration = document.indexedGeneration();
+        validateIndexableDocument(loadDocument(documentId), document.contentSha256(), false);
+        cleanupDanglingGenerationsBeforeIndex(documentId, previousActiveGeneration, vectorStore, milvusVectorIndexer);
+        validateIndexableDocument(loadDocument(documentId), document.contentSha256(), false);
+        deletePendingGeneration(documentId, indexGeneration, previousActiveGeneration, vectorStore, milvusVectorIndexer);
+
+        workflowService.enterChunking(workflowCommand.withMetadata("phase", "chunking"));
+        currentState.set(IndexWorkflowState.CHUNKING);
+        List<String> documentTags = extractDocumentTags(document.metadata());
+        List<RagChunkDraft> drafts = chunker.chunk(document.content()).stream()
+                .map(chunk -> toDraft(document, documentTags, chunk, indexGeneration))
+                .toList();
+        if (drafts.isEmpty()) {
+            throw new NonRetryableIndexingException("文档内容为空，无法建立索引");
+        }
+        log.debug(
+                "RAG 文档切片完成。documentId={}, targetGeneration={}, chunkCount={}, documentTagCount={}",
+                documentId,
+                indexGeneration,
+                drafts.size(),
+                documentTags.size()
+        );
+
+        workflowService.enterSaveChunks(
+                workflowCommand
+                        .withMetadata("phase", "save_chunks")
+                        .withMetadata("chunkDraftCount", drafts.size())
+        );
+        currentState.set(IndexWorkflowState.SAVE_CHUNKS);
+        List<RagChunkRecord> savedChunks = chunkRepository.saveAll(documentId, drafts);
+        int currentMaxChunkIndex = savedChunks.stream()
+                .map(RagChunkRecord::chunkIndex)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .max()
+                .orElse(-1);
+        log.debug(
+                "RAG 切片保存完成。documentId={}, targetGeneration={}, chunkCount={}, maxChunkIndex={}",
+                documentId,
+                indexGeneration,
+                savedChunks.size(),
+                currentMaxChunkIndex
+        );
+        validateIndexableDocument(loadDocument(documentId), document.contentSha256(), true);
+
+        if (vectorStore != null) {
+            workflowService.enterVectorIndexing(
+                    workflowCommand
+                            .withMetadata("phase", "vector_indexing")
+                            .withChunkCount(savedChunks.size())
+            );
+            currentState.set(IndexWorkflowState.VECTOR_INDEXING);
+        }
+        workflowService.enterCommitIndex(
+                workflowCommand
+                        .withMetadata("phase", "commit_index")
+                        .withChunkCount(savedChunks.size())
+        );
+        currentState.set(IndexWorkflowState.COMMIT_INDEX);
+        validateIndexableDocument(loadDocument(documentId), document.contentSha256(), true);
+        if (vectorStore != null) {
+            long vectorWriteStartedAt = System.nanoTime();
+            if (milvusVectorIndexer == null || !milvusVectorIndexer.add(document, savedChunks)) {
+                vectorStore.add(savedChunks.stream()
+                        .map(chunk -> toVectorDocument(document, chunk))
+                        .toList());
+                indexingMetrics.recordMilvusWrite(
+                        savedChunks.size(),
+                        Duration.ofNanos(System.nanoTime() - vectorWriteStartedAt),
+                        false
+                );
+            }
+            vectorWriteApplied.set(true);
+            log.debug(
+                    "RAG 向量提交完成。documentId={}, targetGeneration={}, chunkCount={}, usedCustomMilvusIndexer={}",
+                    documentId,
+                    indexGeneration,
+                    savedChunks.size(),
+                    milvusVectorIndexer != null
+            );
+        }
+        validateIndexableDocument(loadDocument(documentId), document.contentSha256(), true);
+        cleanupObsoleteGenerations(documentId, indexGeneration, currentMaxChunkIndex, vectorStore, milvusVectorIndexer);
+        workflowService.succeed(
+                workflowCommand
+                        .withTargetGeneration(indexGeneration)
+                        .withChunkCount(savedChunks.size())
+                        .withMetadata("maxChunkIndex", currentMaxChunkIndex)
+        );
+        return savedChunks.size();
+    }
+
+    private RagChunkDraft toDraft(
+            DocumentIndexingView document,
+            List<String> documentTags,
+            RagTextChunk chunk,
+            long indexGeneration
+    ) {
+        // stable vectorId 只由 documentId + chunkIndex 组成，这样同一段位可以通过 Upsert 覆盖旧向量。
+        String vectorId = buildStableVectorId(document.id(), chunk.chunkIndex());
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("documentId", document.id());
+        metadata.put("indexGeneration", indexGeneration);
+        metadata.put("sourceType", document.sourceType());
+        metadata.put("sourceUri", defaultString(document.sourceUri()));
+        metadata.put("chunkIndex", chunk.chunkIndex());
+        metadata.put("blockType", chunk.blockType());
+        if (documentTags != null && !documentTags.isEmpty()) {
+            metadata.put("documentTags", new ArrayList<>(documentTags));
+        }
+        if (chunk.headingPath() != null && !chunk.headingPath().isEmpty()) {
+            metadata.put("headingPath", new ArrayList<>(chunk.headingPath()));
+            metadata.put("headingPathText", toHeadingPathText(chunk.headingPath()));
+        }
+        if (chunk.codeLanguage() != null && !chunk.codeLanguage().isBlank()) {
+            metadata.put("codeLanguage", chunk.codeLanguage());
+        }
+        if (chunk.blockMetadata() != null && !chunk.blockMetadata().isEmpty()) {
+            metadata.putAll(chunk.blockMetadata());
+        }
+        return new RagChunkDraft(
+                indexGeneration,
+                chunk.chunkIndex(),
+                chunk.text(),
+                chunk.hash(),
+                chunk.charCount(),
+                chunk.tokenCount(),
+                vectorId,
+                metadata
+        );
+    }
+
+    private String buildStableVectorId(Long documentId, int chunkIndex) {
+        return "rag-" + documentId + "-" + chunkIndex;
+    }
+
+    private Document toVectorDocument(DocumentIndexingView document, RagChunkRecord chunk) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.putAll(parseChunkMetadata(chunk.metadata()));
+        metadata.put("vectorId", chunk.vectorId());
+        metadata.put("documentId", document.id());
+        metadata.put("indexGeneration", chunk.indexGeneration());
+        metadata.put("sourceType", document.sourceType());
+        metadata.put("sourceUri", defaultString(document.sourceUri()));
+        metadata.put("title", defaultString(document.title()));
+        metadata.put("chunkIndex", chunk.chunkIndex());
+        return new Document(chunk.vectorId(), chunk.chunkText(), metadata);
+    }
+
+    private Map<String, Object> parseChunkMetadata(Map<String, Object> metadata) {
+        return metadata == null ? Map.of() : new LinkedHashMap<>(metadata);
+    }
+
+    private String defaultString(String value) {
+        return value == null ? "" : value;
+    }
+
+    private boolean isStaleVersion(DocumentIndexingView document, String expectedContentSha256) {
+        return expectedContentSha256 != null
+                && !expectedContentSha256.isBlank()
+                && !expectedContentSha256.equals(document.contentSha256());
+    }
+
+    private RagIndexStage toRagIndexStage(IndexWorkflowState state) {
+        return switch (state) {
+            case DISPATCHING -> RagIndexStage.DISPATCHING;
+            case PREPARING -> RagIndexStage.PREPARING;
+            case CHUNKING -> RagIndexStage.CHUNKING;
+            case SAVE_CHUNKS -> RagIndexStage.SAVE_CHUNKS;
+            case VECTOR_INDEXING -> RagIndexStage.VECTOR_INDEXING;
+            case COMMIT_INDEX -> RagIndexStage.COMMIT_INDEX;
+            case COMPLETED -> RagIndexStage.COMPLETED;
+            case SKIPPED -> RagIndexStage.SKIPPED;
+            case NEW, QUEUED, FAILED -> RagIndexStage.QUEUED;
+        };
+    }
+
+    private long nextIndexGeneration(DocumentIndexingView document) {
+        long currentGeneration = document.indexedGeneration() == null ? 0L : document.indexedGeneration();
+        long nowGeneration = System.currentTimeMillis();
+        return nowGeneration > currentGeneration ? nowGeneration : currentGeneration + 1L;
+    }
+
+    private String toHeadingPathText(List<String> headingPath) {
+        return headingPath.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(segment -> !segment.isEmpty())
+                .map(segment -> segment.toLowerCase(Locale.ROOT))
+                .reduce((left, right) -> left + " / " + right)
+                .orElse("");
+    }
+
+    private String abbreviate(String message) {
+        if (message == null || message.isBlank()) {
+            return "未知错误";
+        }
+        if (message.length() <= 400) {
+            return message;
+        }
+        return message.substring(0, 400) + "...";
+    }
+
+    private DocumentIndexingView loadDocument(Long documentId) {
+        return documentIndexingSpi.findById(documentId)
+                .orElseThrow(() -> new IllegalArgumentException("RAG 文档不存在: " + documentId));
+    }
+
+    private List<String> extractDocumentTags(Map<String, Object> documentMetadata) {
+        if (documentMetadata == null || documentMetadata.isEmpty()) {
+            return List.of();
+        }
+        try {
+            Map<String, Object> metadata = new LinkedHashMap<>(documentMetadata);
+            if (metadata == null || metadata.isEmpty()) {
+                return List.of();
+            }
+
+            Object frontmatter = metadata.get("frontmatter");
+            if (frontmatter instanceof Map<?, ?> frontmatterMap) {
+                List<String> tags = toStringList(frontmatterMap.get("tags"));
+                if (!tags.isEmpty()) {
+                    return tags;
+                }
+            }
+            return toStringList(metadata.get("tags"));
+        } catch (Exception exception) {
+            return List.of();
+        }
+    }
+
+    private List<String> toStringList(Object value) {
+        if (!(value instanceof List<?> rawList)) {
+            return List.of();
+        }
+        return rawList.stream()
+                .filter(item -> item != null)
+                .map(String::valueOf)
+                .filter(item -> !item.isBlank())
+                .toList();
+    }
+
+    private String buildFailureMessage(Exception exception, String reason) {
+        return "索引失败 [" + reason + "]: "
+                + abbreviate(exception.getMessage());
+    }
+
+    private void deletePendingGeneration(
+            Long documentId,
+            long indexGeneration,
+            Long preservedGeneration,
+            VectorStore vectorStore,
+            RagMilvusVectorIndexer milvusVectorIndexer
+    ) {
+        if (preservedGeneration == null) {
+            List<String> sameGenerationVectorIds = chunkRepository.findVectorIdsByDocumentIdAndGeneration(documentId, indexGeneration);
+            log.debug(
+                    "清理 pending generation 全量向量。documentId={}, generation={}, vectorCount={}",
+                    documentId,
+                    indexGeneration,
+                    sameGenerationVectorIds.size()
+            );
+            deleteVectorIds(sameGenerationVectorIds, vectorStore, milvusVectorIndexer, "pending-generation");
+        } else {
+            Integer preservedMaxChunkIndex = chunkRepository.findMaxChunkIndexByDocumentIdAndGeneration(documentId, preservedGeneration);
+            Integer pendingMaxChunkIndex = chunkRepository.findMaxChunkIndexByDocumentIdAndGeneration(documentId, indexGeneration);
+            log.debug(
+                    "按 stable vectorId 清理 pending generation 尾部。documentId={}, pendingGeneration={}, preservedGeneration={}, fromChunkIndex={}, toChunkIndex={}",
+                    documentId,
+                    indexGeneration,
+                    preservedGeneration,
+                    normalizedNextChunkIndex(preservedMaxChunkIndex),
+                    pendingMaxChunkIndex
+            );
+            deleteStableTailVectors(
+                    documentId,
+                    normalizedNextChunkIndex(preservedMaxChunkIndex),
+                    pendingMaxChunkIndex,
+                    vectorStore,
+                    milvusVectorIndexer,
+                    "pending-generation-tail"
+            );
+        }
+        chunkRepository.deleteByDocumentIdAndGeneration(documentId, indexGeneration);
+    }
+
+    private void cleanupDanglingGenerationsBeforeIndex(
+            Long documentId,
+            Long activeGeneration,
+            VectorStore vectorStore,
+            RagMilvusVectorIndexer milvusVectorIndexer
+    ) {
+        if (activeGeneration == null) {
+            List<String> previousVectorIds = chunkRepository.findVectorIdsByDocumentId(documentId);
+            log.debug(
+                    "索引前清理历史向量。documentId={}, hasActiveGeneration=false, vectorCount={}",
+                    documentId,
+                    previousVectorIds.size()
+            );
+            deleteVectorIds(previousVectorIds, vectorStore, milvusVectorIndexer, "pre-index-all");
+            chunkRepository.deleteByDocumentId(documentId);
+            return;
+        }
+
+        Integer activeMaxChunkIndex = chunkRepository.findMaxChunkIndexByDocumentIdAndGeneration(documentId, activeGeneration);
+        Integer danglingMaxChunkIndex = chunkRepository.findMaxChunkIndexByDocumentIdExceptGeneration(documentId, activeGeneration);
+        log.debug(
+                "索引前清理非 active generation 尾部向量。documentId={}, activeGeneration={}, activeMaxChunkIndex={}, danglingMaxChunkIndex={}",
+                documentId,
+                activeGeneration,
+                activeMaxChunkIndex,
+                danglingMaxChunkIndex
+        );
+        deleteStableTailVectors(
+                documentId,
+                normalizedNextChunkIndex(activeMaxChunkIndex),
+                danglingMaxChunkIndex,
+                vectorStore,
+                milvusVectorIndexer,
+                "pre-index-non-active-tail"
+        );
+        chunkRepository.deleteByDocumentIdExceptGeneration(documentId, activeGeneration);
+    }
+
+    private void cleanupFailedGenerationSafely(
+            Long documentId,
+            long failedGeneration,
+            Long previousActiveGeneration,
+            boolean vectorWriteApplied
+    ) {
+        try {
+            VectorStore vectorStore = currentVectorStore();
+            RagMilvusVectorIndexer milvusVectorIndexer = currentMilvusVectorIndexer();
+            if (vectorWriteApplied && previousActiveGeneration != null) {
+                log.info(
+                        "检测到新向量已写入但索引提交失败，开始恢复 active generation。documentId={}, failedGeneration={}, previousActiveGeneration={}",
+                        documentId,
+                        failedGeneration,
+                        previousActiveGeneration
+                );
+                restoreActiveGenerationVectors(documentId, previousActiveGeneration, vectorStore, milvusVectorIndexer);
+            }
+            deletePendingGeneration(
+                    documentId,
+                    failedGeneration,
+                    previousActiveGeneration,
+                    vectorStore,
+                    milvusVectorIndexer
+            );
+        } catch (Exception cleanupException) {
+            log.warn(
+                    "RAG 文档失败 generation 清理失败。documentId={}, failedGeneration={}, error={}",
+                    documentId,
+                    failedGeneration,
+                    cleanupException.getMessage()
+            );
+        }
+    }
+
+    private void restoreActiveGenerationVectors(
+            Long documentId,
+            Long activeGeneration,
+            VectorStore vectorStore,
+            RagMilvusVectorIndexer milvusVectorIndexer
+    ) {
+        List<RagChunkRecord> activeChunks = chunkRepository.findByDocumentIdAndGeneration(documentId, activeGeneration);
+        if (activeChunks == null || activeChunks.isEmpty()) {
+            log.warn(
+                    "RAG active generation restore skipped because chunks are missing: documentId={}, activeGeneration={}",
+                    documentId,
+                    activeGeneration
+            );
+            return;
+        }
+
+        DocumentIndexingView document = documentIndexingSpi.findById(documentId)
+                .orElseThrow(() -> new IllegalStateException("恢复 active generation 向量失败，文档不存在: " + documentId));
+
+        log.info(
+                "RAG active generation restore started: documentId={}, activeGeneration={}, chunkCount={}",
+                documentId,
+                activeGeneration,
+                activeChunks.size()
+        );
+        if (milvusVectorIndexer != null) {
+            if (milvusVectorIndexer.add(document, activeChunks)) {
+                return;
+            }
+        }
+        if (vectorStore != null) {
+            vectorStore.add(activeChunks.stream()
+                    .map(chunk -> toVectorDocument(document, chunk))
+                    .toList());
+            return;
+        }
+        log.debug(
+                "当前未启用向量存储，跳过 active generation 恢复。documentId={}, activeGeneration={}",
+                documentId,
+                activeGeneration
+        );
+    }
+
+    private void cleanupObsoleteGenerations(
+            Long documentId,
+            long activeGeneration,
+            int activeMaxChunkIndex,
+            VectorStore vectorStore,
+            RagMilvusVectorIndexer milvusVectorIndexer
+    ) {
+        Integer obsoleteMaxChunkIndex = chunkRepository.findMaxChunkIndexByDocumentIdExceptGeneration(documentId, activeGeneration);
+        log.debug(
+                "提交后清理旧 generation 尾部向量。documentId={}, activeGeneration={}, activeMaxChunkIndex={}, obsoleteMaxChunkIndex={}",
+                documentId,
+                activeGeneration,
+                activeMaxChunkIndex,
+                obsoleteMaxChunkIndex
+        );
+        deleteStableTailVectors(
+                documentId,
+                activeMaxChunkIndex + 1,
+                obsoleteMaxChunkIndex,
+                vectorStore,
+                milvusVectorIndexer,
+                "obsolete-generation-tail"
+        );
+        chunkRepository.deleteByDocumentIdExceptGeneration(documentId, activeGeneration);
+    }
+
+    private void deleteDocumentIndex(
+            Long documentId,
+            VectorStore vectorStore,
+            RagMilvusVectorIndexer milvusVectorIndexer
+    ) {
+        List<String> previousVectorIds = chunkRepository.findVectorIdsByDocumentId(documentId);
+        log.info(
+                "RAG document index cleanup started: documentId={}, vectorCount={}",
+                documentId,
+                previousVectorIds.size()
+        );
+        deleteVectorIds(previousVectorIds, vectorStore, milvusVectorIndexer, "document-delete");
+        chunkRepository.deleteByDocumentId(documentId);
+    }
+
+    private void deleteVectorIds(
+            List<String> vectorIds,
+            VectorStore vectorStore,
+            RagMilvusVectorIndexer milvusVectorIndexer,
+            String phase
+    ) {
+        if (vectorIds == null || vectorIds.isEmpty()) {
+            return;
+        }
+        List<String> normalizedVectorIds = vectorIds.stream()
+                .filter(vectorId -> vectorId != null && !vectorId.isBlank())
+                .distinct()
+                .toList();
+        if (normalizedVectorIds.isEmpty()) {
+            return;
+        }
+        if (milvusVectorIndexer != null) {
+            milvusVectorIndexer.delete(normalizedVectorIds);
+            return;
+        }
+        if (vectorStore != null) {
+            try {
+                vectorStore.delete(normalizedVectorIds);
+            } catch (Exception exception) {
+                String message = exception.getMessage();
+                if (message != null && message.toLowerCase(Locale.ROOT).contains("collection not found")) {
+                    log.warn("Milvus 集合不存在，跳过向量删除。phase={}, vectorCount={}", phase, normalizedVectorIds.size());
+                    return;
+                }
+                throw exception;
+            }
+            return;
+        }
+        log.debug("当前未启用向量删除。phase={}, vectorCount={}", phase, normalizedVectorIds.size());
+    }
+
+    private void deleteStableTailVectors(
+            Long documentId,
+            int fromChunkIndexInclusive,
+            Integer toChunkIndexInclusive,
+            VectorStore vectorStore,
+            RagMilvusVectorIndexer milvusVectorIndexer,
+            String phase
+    ) {
+        if (toChunkIndexInclusive == null || fromChunkIndexInclusive > toChunkIndexInclusive) {
+            return;
+        }
+        // stable vectorId 语义下，只有文档变短时才需要物理删除尾部向量，前半段直接由 Upsert 覆盖。
+        List<String> stableVectorIds = new ArrayList<>();
+        for (int chunkIndex = Math.max(0, fromChunkIndexInclusive); chunkIndex <= toChunkIndexInclusive; chunkIndex++) {
+            stableVectorIds.add(buildStableVectorId(documentId, chunkIndex));
+        }
+        log.debug(
+                "按 stable vectorId 删除尾部向量。phase={}, documentId={}, fromChunkIndex={}, toChunkIndex={}, vectorCount={}",
+                phase,
+                documentId,
+                Math.max(0, fromChunkIndexInclusive),
+                toChunkIndexInclusive,
+                stableVectorIds.size()
+        );
+        deleteVectorIds(stableVectorIds, vectorStore, milvusVectorIndexer, phase);
+    }
+
+    private int normalizedNextChunkIndex(Integer maxChunkIndex) {
+        return maxChunkIndex == null ? 0 : maxChunkIndex + 1;
+    }
+
+    private VectorStore currentVectorStore() {
+        if (!ragProperties.milvus().enabled()) {
+            return null;
+        }
+        return vectorStoreProvider.getIfAvailable();
+    }
+
+    private RagMilvusVectorIndexer currentMilvusVectorIndexer() {
+        if (!ragProperties.milvus().enabled()) {
+            return null;
+        }
+        return milvusVectorIndexerProvider.getIfAvailable();
+    }
+
+    private void validateIndexableDocument(
+            DocumentIndexingView document,
+            String expectedContentSha256,
+            boolean requiresCleanup
+    ) {
+        String jobContentSha256 = expectedContentSha256 != null && !expectedContentSha256.isBlank()
+                ? expectedContentSha256
+                : document.contentSha256();
+        if (RagDocumentStatus.DELETING.name().equals(document.status())) {
+            throw new SkippedIndexingException(jobContentSha256, "文档处于 DELETING，索引任务被跳过", requiresCleanup);
+        }
+        if (isStaleVersion(document, expectedContentSha256)) {
+            throw new SkippedIndexingException(jobContentSha256, "文档版本已变化，旧索引任务被跳过", requiresCleanup);
+        }
+    }
+
+    private static final class NonRetryableIndexingException extends RuntimeException {
+
+        private NonRetryableIndexingException(String message) {
+            super(message);
+        }
+
+        private NonRetryableIndexingException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    private static final class SkippedIndexingException extends RuntimeException {
+
+        private final String contentSha256;
+        private final String reason;
+        private final boolean requiresCleanup;
+
+        private SkippedIndexingException(String contentSha256, String reason, boolean requiresCleanup) {
+            super(reason);
+            this.contentSha256 = contentSha256;
+            this.reason = reason;
+            this.requiresCleanup = requiresCleanup;
+        }
+
+        private String contentSha256() {
+            return contentSha256;
+        }
+
+        private String reason() {
+            return reason;
+        }
+
+        private boolean requiresCleanup() {
+            return requiresCleanup;
+        }
+    }
+}

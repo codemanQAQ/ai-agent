@@ -1,0 +1,265 @@
+#-------------------------------------------------------------------------------#
+#               Qodana analysis is configured by qodana.yaml file               #
+#             https://www.jetbrains.com/help/qodana/qodana-yaml.html            #
+#-------------------------------------------------------------------------------#
+#################################################################################
+#              WARNING: Do not store sensitive information in this file,        #
+#               as its contents will be included in the Qodana report.          #
+#################################################################################
+version: "1.0"
+#Specify inspection profile for code analysis
+profile:
+  name: qodana.starter
+#Enable inspections
+#include:
+#  - name: <SomeEnabledInspectionId>
+#Disable inspections
+#exclude:
+#  - name: <SomeDisabledInspectionId>
+#    paths:
+#      - <path/where/not/run/inspection>
+projectJDK: "25" #(Applied in CI/CD pipeline)
+#Execute shell command before Qodana execution (Applied in CI/CD pipeline)
+#bootstrap: sh ./prepare-qodana.sh
+#Install IDE plugins before Qodana execution (Applied in CI/CD pipeline)
+#plugins:
+#  - id: <plugin.id> #(plugin id can be found at https://plugins.jetbrains.com)
+# Quality gate. Will fail the CI/CD pipeline if any condition is not met
+# severityThresholds - configures maximum thresholds for different problem severities
+# testCoverageThresholds - configures minimum code coverage on a whole project and newly added code
+# Code Coverage is available in Ultimate and Ultimate Plus plans
+#failureConditions:
+#  severityThresholds:
+#    any: 15
+#    critical: 5
+#  testCoverageThresholds:
+#    fresh: 70
+#    total: 50
+#Specify Qodana linter for analysis (Applied in CI/CD pipeline)
+linter: jetbrains/qodana-jvm:2025.3
+exclude:
+  - name: All
+    paths:
+      - src
+include:
+  - name: HttpUrlsUsage
+  - name: VulnerableCodeUsages
+  - name: VulnerableLibrariesGlobal
+  - name: VulnerableLibrariesLocal
+  - name: PatternNotApplicable
+  - name: PatternOverriddenByNonAnnotatedMethod
+  - name: PatternValidation
+  - name: MissingFinalNewline
+  - name: ArgNamesErrorsInspection
+  - name: ArgNamesWarningsInspection
+  - name: AopLanguageInspection
+  - name: PointcutMethodStyleInspection
+  - name: DeclareParentsInspection
+  - name: AroundAdviceStyleInspection
+  - name: BvConstraintMappingsInspection
+  - name: BvConfigDomInspection
+  - name: MinMaxValuesInspection
+  - name: CdiAlternativeInspection
+  - name: CdiDecoratorInspection
+  - name: CdiSpecializesInspection
+  - name: CdiStereotypeInspection
+  - name: CdiTypedAnnotationInspection
+  - name: CdiScopeInspection
+  - name: CdiDisposerMethodInspection
+  - name: CdiObservesInspection
+  - name: CdiManagedBeanInconsistencyInspection
+  - name: CdiInjectInspection
+  - name: CdiNormalScopeInspection
+  - name: CdiInterceptorInspection
+  - name: CdiUnproxyableBeanTypesInspection
+  - name: CdiUnknownProducersForDisposerMethodInspection
+  - name: CdiInjectionPointsInspection
+  - name: CdiStereotypeRestrictionsInspection
+  - name: CdiDomBeans
+  - name: SqlJoinWithoutOnInspection
+  - name: SqlIdentifierInspection
+  - name: SqlWithoutWhereInspection
+  - name: SqlUnreachableCodeInspection
+  - name: SqlAmbiguousColumnInspection
+  - name: SqlInsertIntoGeneratedColumnInspection
+  - name: SqlMultipleLimitClausesInspection
+  - name: SqlRedundantLimitInspection
+  - name: SqlTriggerTransitionInspection
+  - name: SqlIllegalCursorStateInspection
+  - name: SqlSignatureInspection
+  - name: SqlCheckUsingColumnsInspection
+  - name: SqlSideEffectsInspection
+  - name: SqlInsertNullIntoNotNullInspection
+  - name: SqlShouldBeInGroupByInspection
+  - name: SqlShadowingAliasInspection
+  - name: SqlTypeInspection
+  - name: SqlDerivedTableAliasInspection
+  - name: SqlDeprecateTypeInspection
+  - name: SqlMissingReturnInspection
+  - name: SqlMissingColumnAliasesInspection
+  - name: SqlRedundantElseNullInspection
+  - name: SqlRedundantAliasInspection
+  - name: SqlRedundantAliasInspection
+  - name: SqlRedundantOrderingDirectionInspection
+  - name: SqlCaseVsCoalesceInspection
+  - name: SqlCaseVsIfInspection
+  - name: SqlGotoInspection
+  - name: SqlCallNotationInspection
+  - name: SqlDropIndexedColumnInspection
+  - name: SqlAddNotNullColumnInspection
+  - name: SqlResolveInspection
+  - name: SqlNoDataSourceInspection
+  - name: SqlUnusedVariableInspection
+  - name: SqlUnusedCteInspection
+  - name: SqlUnusedSubqueryItemInspection
+  - name: SqlMisleadingReferenceInspection
+  - name: SqlStringLengthExceededInspection
+  - name: SqlNamedArgumentsInspection
+  - name: SqlTransactionStatementInTriggerInspection
+  - name: SqlAggregatesInspection
+  - name: SqlAutoIncrementDuplicateInspection
+  - name: SqlRedundantCodeInCoalesceInspection
+  - name: SqlJoinCountInspection
+  - name: SqlDuplicateColumnInspection
+  - name: SqlDialectInspection
+  - name: SqlInsertValuesInspection
+  - name: YAMLRecursiveAlias
+  - name: YAMLIncompatibleTypes
+  - name: YAMLSchemaDeprecation
+  - name: YAMLUnresolvedAlias
+  - name: YAMLUnusedAnchor
+  - name: YAMLSchemaValidation
+  - name: YAMLDuplicatedKeys
+  - name: MavenModulesInMaven4
+  - name: MavenBomPackagingInOldSchema
+  - name: MavenNewModelVersionInOldMaven
+  - name: MavenNewElementsInOldSchema
+  - name: MavenNewModelVersionInOldSchema
+  - name: MavenParentMissedGroupIdArtifactIdInspection
+  - name: MavenParentMissedVersionInspection
+  - name: MavenRedundantGroupId
+  - name: MavenRedundantVersion
+  - name: MavenNoRootDefined
+  - name: MavenModelVersionMissed
+  - name: Maven4RedundantParentCoordinates
+  - name: MavenPropertyInParent
+  - name: MavenDuplicatePluginInspection
+  - name: MavenDuplicateDependenciesInspection
+  - name: MavenModelInspection
+  - name: SynchronizedMethod
+  - name: ThreadLocalNotStaticFinal
+  - name: SharedThreadLocalRandom
+  - name: WaitNotifyNotInSynchronizedContext
+  - name: ObjectNotify
+  - name: ConditionSignal
+  - name: ThreadPriority
+  - name: ThreadStopSuspendResume
+  - name: ThreadStopSuspendResume
+  - name: ThreadYield
+  - name: ThreadStartInConstruction
+  - name: AccessToStaticFieldLockedOnInstance
+  - name: AccessToNonThreadSafeStaticFieldFromInstance
+  - name: ExtendsThread
+  - name: SignalWithoutCorrespondingAwait
+  - name: WaitWithoutCorrespondingNotify
+  - name: NotifyWithoutCorrespondingWait
+  - name: NotifyWithoutCorrespondingWait
+  - name: AwaitWithoutCorrespondingSignal
+  - name: NakedNotify
+  - name: NestedSynchronizedStatement
+  - name: CallToNativeMethodWhileLocked
+  - name: SleepWhileHoldingLock
+  - name: NonSynchronizedMethodOverridesSynchronizedMethod
+  - name: FieldAccessedSynchronizedAndUnsynchronized
+  - name: AwaitNotInLoop
+  - name: WaitNotInLoop
+  - name: WaitOrAwaitWithoutTimeout
+  - name: SafeLock
+  - name: UnconditionalWait
+  - name: NotifyCalledOnCondition
+  - name: WaitCalledOnCondition
+  - name: SynchronizeOnLock
+  - name: SynchronizationOnStaticField
+  - name: PublicFieldAccessedInSynchronizedContext
+  - name: SynchronizeOnThis
+  - name: SynchronizeOnThis
+  - name: SynchronizedOnLiteralObject
+  - name: MethodMayBeSynchronized
+  - name: VolatileArrayField
+  - name: ArraysAsListWithZeroOrOneArgument
+  - name: ObjectEqualsCanBeEquality
+  - name: ObjectInstantiationInEqualsHashCode
+  - name: MapReplaceableByEnumMap
+  - name: SetReplaceableByEnumSet
+  - name: StringEqualsEmptyString
+  - name: LengthOneStringInIndexOf
+  - name: LengthOneStringInIndexOf
+  - name: CallToSimpleGetterInClass
+  - name: CallToSimpleSetterInClass
+  - name: LengthOneStringsInConcatenation
+  - name: LengthOneStringsInConcatenation
+  - name: DynamicRegexReplaceableByCompiledPattern
+  - name: MethodMayBeStatic
+  - name: StringReplaceableByStringBuffer
+  - name: BulkFileAttributesRead
+  - name: IOStreamConstructor
+  - name: KeySetIterationMayUseEntrySet
+  - name: StringBufferMustHaveInitialCapacity
+  - name: CollectionsMustHaveInitialCapacity
+  - name: ClassInitializerMayBeStatic
+  - name: RandomDoubleForRandomInteger
+  - name: ExplicitArgumentCanBeLambda
+  - name: TailRecursion
+  - name: ObjectAllocationInLoop
+  - name: FieldMayBeStatic
+  - name: AutoBoxing
+  - name: AutoUnboxing
+  - name: ComparatorNotSerializable
+  - name: ComparatorNotSerializable
+  - name: ReadObjectAndWriteObjectPrivate
+  - name: ReadResolveAndWriteReplaceProtected
+  - name: SerializableStoresNonSerializable
+  - name: NonSerializableFieldInSerializableClass
+  - name: SerialPersistentFieldsWithWrongSignature
+  - name: SerializableHasSerializationMethods
+  - name: NonSerializableObjectBoundToHttpSession
+  - name: NonSerializableObjectPassedToObjectStream
+  - name: TransientFieldInNonSerializableClass
+  - name: NonSerializableWithSerializationMethods
+  - name: ExternalizableWithSerializationMethods
+  - name: SerializableWithUnconstructableAncestor
+  - name: SerializableInnerClassWithNonSerializableOuterClass
+  - name: SerializableInnerClassHasSerialVersionUIDField
+  - name: ReadObjectInitialization
+  - name: TransientFieldNotInitialized
+  - name: ClassLoaderInstantiation
+  - name: JDBCPrepareStatementWithNonConstantString
+  - name: PublicStaticCollectionField
+  - name: PublicStaticArrayField
+  - name: RuntimeExecWithNonConstantString
+  - name: JDBCExecuteWithNonConstantString
+  - name: LoadLibraryWithNonConstantString
+  - name: CloneableClassInSecureContext
+  - name: SerializableDeserializableClassInSecureContext
+  - name: UnsecureRandomNumberGeneration
+  - name: SystemSetSecurityManager
+  - name: NonFinalClone
+  - name: CustomClassloader
+  - name: DesignForExtension
+  - name: SystemProperties
+  - name: CustomSecurityManager
+  - name: JavaLangImport
+  - name: MISSORTED_IMPORTS
+  - name: SingleClassImport
+  - name: UNUSED_IMPORT
+  - name: SamePackageImport
+  - name: StaticImport
+  - name: StaticImport
+  - name: ThreadDumpStack
+  - name: Deprecation
+  - name: SystemOutErr
+  - name: UseOfObsoleteDateTimeApi
+  - name: ObsoleteCollection
+  - name: ConstantAssertArgument
+  - name: AssertWithoutMessage
+  - name: ExceptionPackage
