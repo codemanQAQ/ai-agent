@@ -1,18 +1,19 @@
 package com.involutionhell.backend.rag.indexing.messaging;
 
-import com.involutionhell.backend.rag.indexing.messaging.RagIndexMessage;
-import com.involutionhell.backend.rag.shared.properties.RagProperties;
+import com.involutionhell.backend.rag.indexing.application.RagIndexMessageFailureAuditService;
+import com.involutionhell.backend.rag.indexing.application.RagIndexSuccessStateService;
+import com.involutionhell.backend.rag.indexing.application.RagIndexTerminalStateService;
+import com.involutionhell.backend.rag.indexing.application.RagIndexingService;
 import com.involutionhell.backend.rag.indexing.model.RagIndexAttemptException;
 import com.involutionhell.backend.rag.indexing.model.RagIndexFailure;
-import com.involutionhell.backend.rag.indexing.service.RagIndexingFailureClassifier;
-import com.involutionhell.backend.rag.indexing.application.RagIndexMessageFailureAuditService;
-import com.involutionhell.backend.rag.indexing.application.RagIndexingService;
+import com.involutionhell.backend.rag.indexing.notification.RagFinalFailureEmailNotifier;
+import com.involutionhell.backend.rag.indexing.notification.RagIndexMessageParseFailureNotifier;
 import com.involutionhell.backend.rag.indexing.persistence.RagIndexOutboxRepository;
+import com.involutionhell.backend.rag.indexing.service.RagIndexingFailureClassifier;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowCommand;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowService;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowTriggerType;
-import com.involutionhell.backend.rag.indexing.notification.RagFinalFailureEmailNotifier;
-import com.involutionhell.backend.rag.indexing.notification.RagIndexMessageParseFailureNotifier;
+import com.involutionhell.backend.rag.shared.properties.RagProperties;
 import com.involutionhell.backend.rag.shared.support.RagJsonCodec;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
 import org.apache.rocketmq.client.annotation.RocketMQMessageListener;
@@ -25,6 +26,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -50,6 +52,8 @@ public class RagIndexMessageListener implements RocketMQListener {
     private final RagProperties ragProperties;
     private final RagIndexingFailureClassifier failureClassifier;
     private final RagIndexingService ragIndexingService;
+    private final RagIndexTerminalStateService terminalStateService;
+    private final RagIndexSuccessStateService ragIndexSuccessStateService;
     private final IndexWorkflowService workflowService;
     private final RagIndexOutboxRepository outboxRepository;
     private final RagIndexMessageFailureAuditService messageFailureAuditService;
@@ -61,6 +65,8 @@ public class RagIndexMessageListener implements RocketMQListener {
             RagProperties ragProperties,
             RagIndexingFailureClassifier failureClassifier,
             RagIndexingService ragIndexingService,
+            RagIndexTerminalStateService terminalStateService,
+            RagIndexSuccessStateService ragIndexSuccessStateService,
             IndexWorkflowService workflowService,
             RagIndexOutboxRepository outboxRepository,
             RagIndexMessageFailureAuditService messageFailureAuditService,
@@ -71,6 +77,8 @@ public class RagIndexMessageListener implements RocketMQListener {
         this.ragProperties = ragProperties;
         this.failureClassifier = failureClassifier;
         this.ragIndexingService = ragIndexingService;
+        this.terminalStateService = terminalStateService;
+        this.ragIndexSuccessStateService = ragIndexSuccessStateService;
         this.workflowService = workflowService;
         this.outboxRepository = outboxRepository;
         this.messageFailureAuditService = messageFailureAuditService;
@@ -82,12 +90,13 @@ public class RagIndexMessageListener implements RocketMQListener {
     public ConsumeResult consume(MessageView messageView) {
         RagIndexMessage message = null;
         int deliveryAttempt = normalizeDeliveryAttempt(messageView.getDeliveryAttempt());
-        String messageId = null;
+        String messageId = messageView.getMessageId().toString();
         byte[] bytes = null;
         try {
             // RocketMQ 消息体以 ByteBuffer 暴露，这里先复制再做 JSON 反序列化。
-            bytes = new byte[messageView.getBody().remaining()];
-            messageView.getBody().duplicate().get(bytes);
+            ByteBuffer body = messageView.getBody().duplicate();
+            bytes = new byte[body.remaining()];
+            body.get(bytes);
             message = jsonCodec.read(new String(bytes, StandardCharsets.UTF_8), RagIndexMessage.class);
             // 将 messageId 绑定到 job，方便后续从库表和日志一起追踪一次消费。
             log.info(
@@ -97,14 +106,31 @@ public class RagIndexMessageListener implements RocketMQListener {
                     RagLogHelper.shortSha(message.contentSha256()),
                     deliveryAttempt
             );
-            messageId = String.valueOf(messageView.getMessageId());
             workflowService.attachMessageId(message.documentId(), message.contentSha256(), messageId);
             ragIndexingService.indexDocument(
                     message.documentId(),
                     message.contentSha256(),
                     command(message, messageId, deliveryAttempt)
             );
-            confirmConsumption(message.documentId(), message.contentSha256(), messageId);
+
+            try {
+                ragIndexSuccessStateService.confirmConsumedOrThrow(
+                        message.documentId(),
+                        message.contentSha256(),
+                        messageId
+                );
+            } catch (Exception confirmException) {
+                log.error(
+                        "RAG index message succeeded but outbox confirmation failed, MQ will retry: messageId={}, documentId={}, contentSha={}, error={}",
+                        messageView.getMessageId(),
+                        message.documentId(),
+                        RagLogHelper.shortSha(message.contentSha256()),
+                        RagLogHelper.errorSummary(confirmException),
+                        confirmException
+                );
+                return ConsumeResult.FAILURE;
+            }
+
             log.debug(
                     "RAG index message handled successfully: messageId={}, documentId={}, contentSha={}",
                     messageView.getMessageId(),
@@ -114,10 +140,10 @@ public class RagIndexMessageListener implements RocketMQListener {
             return ConsumeResult.SUCCESS;
         } catch (IllegalArgumentException exception) {
             if (message != null) {
-                workflowService.skip(command(message, messageId, deliveryAttempt)
+                IndexWorkflowCommand skipCommand = command(message, messageId, deliveryAttempt)
                         .withNote(exception.getMessage())
-                        .withFailure("invalid", exception.getMessage()));
-                confirmConsumption(message.documentId(), message.contentSha256(), messageId);
+                        .withFailure("invalid", exception.getMessage());
+                terminalStateService.skipAndConfirmConsumed(skipCommand);
             }
             log.warn(
                     "RAG index message ignored because document is unavailable: messageId={}, error={}",
@@ -175,8 +201,8 @@ public class RagIndexMessageListener implements RocketMQListener {
                     deliveryAttempt,
                     failure.retryable(),
                     failure.reason(),
-                "索引失败 [" + failure.reason() + "]: " + abbreviate(exception.getMessage()),
-                exception
+                    "索引失败 [" + failure.reason() + "]: " + abbreviate(exception.getMessage()),
+                    exception
             );
         }
     }
@@ -241,20 +267,30 @@ public class RagIndexMessageListener implements RocketMQListener {
         String finalErrorMessage = retryable
                 ? errorMessage + "（RocketMQ 已达到最大投递次数 " + deliveryAttempt + "/" + maxAttempts + "）"
                 : errorMessage;
+        IndexWorkflowCommand finalCommand = command.withFailure(reason, finalErrorMessage);
 
-        // 进入这里说明 MQ 已经不再适合兜底，需要把最终失败状态明确写回数据库。
-        workflowService.fail(command.withFailure(reason, finalErrorMessage));
-        confirmConsumption(message.documentId(), message.contentSha256(), messageId);
-        if (retryable && deliveryAttempt >= maxAttempts) {
+        // 进入这里说明 MQ 已经不再适合兜底，需要把最终失败状态和 outbox 消费确认在同一事务里落库。
+        terminalStateService.failAndConfirmConsumed(finalCommand);
+        if (retryable) {
             RagFinalFailureEmailNotifier notifier = finalFailureEmailNotifierProvider.getIfAvailable();
             if (notifier != null) {
-                notifier.notifyFinalFailure(
-                        message.documentId(),
-                        message.contentSha256(),
-                        finalErrorMessage,
-                        maxAttempts,
-                        messageId
-                );
+                try {
+                    notifier.notifyFinalFailure(
+                            message.documentId(),
+                            message.contentSha256(),
+                            finalErrorMessage,
+                            maxAttempts,
+                            messageId
+                    );
+                } catch (Exception notifyException) {
+                    // 通知失败不应影响消费结果，仅记录告警
+                    log.warn(
+                            "RAG final failure email notification failed: messageId={}, documentId={}, error={}",
+                            messageId,
+                            message.documentId(),
+                            RagLogHelper.errorSummary(notifyException)
+                    );
+                }
             }
         }
 
@@ -280,31 +316,6 @@ public class RagIndexMessageListener implements RocketMQListener {
             );
         }
         return ConsumeResult.SUCCESS;
-    }
-
-    private void confirmConsumption(Long documentId, String contentSha256, String messageId) {
-        if (messageId == null || messageId.isBlank()) {
-            return;
-        }
-        try {
-            boolean confirmed = outboxRepository.confirmConsumed(documentId, contentSha256, messageId);
-            if (!confirmed) {
-                log.debug(
-                        "RAG outbox consumption confirmation skipped because no matching event was found: messageId={}, documentId={}, contentSha={}",
-                        messageId,
-                        documentId,
-                        RagLogHelper.shortSha(contentSha256)
-                );
-            }
-        } catch (Exception exception) {
-            log.warn(
-                    "RAG outbox consumption confirmation failed: messageId={}, documentId={}, contentSha={}, error={}",
-                    messageId,
-                    documentId,
-                    RagLogHelper.shortSha(contentSha256),
-                    RagLogHelper.errorSummary(exception)
-            );
-        }
     }
 
     private void confirmConsumptionByMessageId(String messageId) {

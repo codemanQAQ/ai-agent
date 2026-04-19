@@ -8,12 +8,14 @@ import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowCommand;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowService;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowTriggerType;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
-import java.util.concurrent.Executor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
+
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 未启用 RocketMQ 时，直接在当前进程执行索引。
@@ -54,8 +56,33 @@ public class RagDirectIndexEventPublisher implements RagIndexEventPublisher {
                 documentId,
                 RagLogHelper.shortSha(contentSha256)
         );
-        ragVirtualThreadExecutor.execute(() -> executeIndexing(documentId, contentSha256, command));
-        return "direct-" + documentId + "-" + RagLogHelper.shortSha(contentSha256);
+
+        String publishId = "direct-" + documentId + "-" + RagLogHelper.shortSha(contentSha256);
+
+        try {
+            ragVirtualThreadExecutor.execute(() -> executeIndexing(documentId, contentSha256, command));
+            return publishId;
+        } catch (RejectedExecutionException exception) {
+            String reason = "executor_rejected";
+            String errorMessage = "Direct RAG indexing task was rejected by executor: "
+                    + abbreviate(exception.getMessage());
+
+            failDirectIndexing(command, reason, errorMessage);
+
+            log.error(
+                    "Direct RAG indexing submission was rejected: documentId={}, contentSha={}, publishId={}, error={}",
+                    documentId,
+                    RagLogHelper.shortSha(contentSha256),
+                    publishId,
+                    RagLogHelper.errorSummary(exception),
+                    exception
+            );
+
+            throw new IllegalStateException(
+                    "Failed to schedule direct RAG indexing task: executor rejected submission",
+                    exception
+            );
+        }
     }
 
     private void executeIndexing(Long documentId, String contentSha256, IndexWorkflowCommand command) {

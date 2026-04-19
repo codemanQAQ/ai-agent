@@ -1,10 +1,11 @@
 package com.involutionhell.backend.rag.shared.support;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 统一承接 RAG 模块内的 JSON 编解码，避免业务层直接散落 ObjectMapper 调用。
@@ -54,7 +55,7 @@ public class RagJsonCodec {
         if (value == null) {
             return Map.of();
         }
-        if (value instanceof Map<?,?> rawMap) {
+        if (value instanceof Map<?, ?> rawMap) {
             Map<String, Object> normalized = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
                 if (entry.getKey() != null) {
