@@ -3,14 +3,15 @@ package com.involutionhell.backend.rag.indexing.service;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.involutionhell.backend.rag.document.spi.DocumentIndexingView;
-import com.involutionhell.backend.rag.shared.properties.RagProperties;
-import com.involutionhell.backend.rag.indexing.persistence.RagEmbeddingCacheRepository;
 import com.involutionhell.backend.rag.indexing.persistence.RagChunkRecord;
 import com.involutionhell.backend.rag.indexing.persistence.RagEmbeddingCacheDraft;
+import com.involutionhell.backend.rag.indexing.persistence.RagEmbeddingCacheRepository;
 import com.involutionhell.backend.rag.shared.metadata.RagChunkMetadataHelper;
+import com.involutionhell.backend.rag.shared.properties.RagProperties;
 import com.involutionhell.backend.rag.shared.support.RagJsonCodec;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
 import io.milvus.client.MilvusServiceClient;
+import io.milvus.grpc.MutationResult;
 import io.milvus.param.R;
 import io.milvus.param.dml.DeleteParam;
 import io.milvus.param.dml.InsertParam;
@@ -27,10 +28,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * 负责复用 embedding 缓存并直接写入 Milvus，避免 chunk 未变化时重复调用 embedding 模型。
@@ -49,7 +47,6 @@ public class RagMilvusVectorIndexer {
     private final RagIndexingMetrics indexingMetrics;
     private final RagProperties ragProperties;
     private final RagJsonCodec jsonCodec;
-    private final RagChunkMetadataHelper metadataHelper;
     private final Gson gson = new Gson();
 
     public RagMilvusVectorIndexer(
@@ -58,8 +55,7 @@ public class RagMilvusVectorIndexer {
             RagEmbeddingCacheRepository embeddingCacheRepository,
             RagIndexingMetrics indexingMetrics,
             RagProperties ragProperties,
-            RagJsonCodec jsonCodec,
-            RagChunkMetadataHelper metadataHelper
+            RagJsonCodec jsonCodec
     ) {
         this.milvusClientProvider = milvusClientProvider;
         this.embeddingModelProvider = embeddingModelProvider;
@@ -67,32 +63,27 @@ public class RagMilvusVectorIndexer {
         this.indexingMetrics = indexingMetrics;
         this.ragProperties = ragProperties;
         this.jsonCodec = jsonCodec;
-        this.metadataHelper = metadataHelper;
     }
 
     /**
      * 将当前 generation 的切片批量写入 Milvus。
      * stable vectorId 模式下，相同段位通过 Upsert 覆盖旧向量，而不是继续插入新 ID。
      */
-    public boolean add(DocumentIndexingView document, List<RagChunkRecord> chunks) {
+    public void add(DocumentIndexingView document, List<RagChunkRecord> chunks) {
         if (!ragProperties.milvus().enabled() || chunks == null || chunks.isEmpty()) {
-            log.debug(
-                    "Skipping Milvus write: milvusEnabled={}, chunkCount={}",
-                    ragProperties.milvus().enabled(),
-                    chunks == null ? 0 : chunks.size()
+            throw new IllegalStateException(
+                    "Milvus 写入前置条件不满足: milvusEnabled=" + ragProperties.milvus().enabled()
+                            + ", chunkCount=" + (chunks == null ? 0 : chunks.size())
             );
-            return false;
         }
 
         MilvusServiceClient milvusClient = milvusClientProvider.getIfAvailable();
         EmbeddingModel embeddingModel = embeddingModelProvider.getIfAvailable();
         if (milvusClient == null || embeddingModel == null) {
-            log.warn(
-                    "Milvus write falling back to default vector path because required beans are missing: hasMilvusClient={}, hasEmbeddingModel={}",
-                    milvusClient != null,
-                    embeddingModel != null
+            throw new IllegalStateException(
+                    "Milvus 写入依赖缺失: hasMilvusClient=" + (milvusClient != null)
+                            + ", hasEmbeddingModel=" + (embeddingModel != null)
             );
-            return false;
         }
 
         long writeStart = System.nanoTime();
@@ -154,7 +145,6 @@ public class RagMilvusVectorIndexer {
                 chunks.size(),
                 resolveCollectionName()
         );
-        return true;
     }
 
     /**
@@ -209,6 +199,29 @@ public class RagMilvusVectorIndexer {
         );
     }
 
+    public void deleteByDocumentId(Long documentId) {
+        MilvusServiceClient milvusClient = milvusClientProvider.getIfAvailable();
+        // 构建 Milvus 的布尔表达式 (假设你在存入时 metadata 里的 key 叫 "documentId")
+        String expr = "documentId == " + documentId;
+
+        try {
+            DeleteParam deleteParam = DeleteParam.newBuilder()
+                    .withCollectionName("rag_chunks") // 你的集合名称
+                    .withExpr(expr)
+                    .build();
+
+            R<MutationResult> response = Objects.requireNonNull(milvusClient).delete(deleteParam);
+
+            if (response.getStatus() != R.Status.Success.getCode()) {
+                throw new RuntimeException("Milvus 根据 documentId 删除失败: " + response.getMessage());
+            }
+        } catch (Exception e) {
+            // 捕获特定异常并决定是否抛出
+            log.error("Milvus 表达式删除异常, documentId={}, error={}", documentId, e.getMessage(), e);
+            throw e;
+        }
+    }
+
     private Map<String, float[]> resolveEmbeddings(List<RagChunkRecord> chunks, EmbeddingModel embeddingModel) {
         String model = ragProperties.embeddingModel();
         int dimension = resolveEmbeddingDimension();
@@ -226,10 +239,10 @@ public class RagMilvusVectorIndexer {
 
         Map<String, String> cachedJsonByHash = ragProperties.indexing().embeddingCacheEnabled()
                 ? embeddingCacheRepository.findEmbeddingJsonByChunkHashes(
-                        uniqueChunks.stream().map(RagChunkRecord::chunkHash).toList(),
-                        model,
-                        dimension
-                )
+                uniqueChunks.stream().map(RagChunkRecord::chunkHash).toList(),
+                model,
+                dimension
+        )
                 : Map.of();
 
         Map<String, float[]> embeddingsByHash = new LinkedHashMap<>();

@@ -1,42 +1,32 @@
 package com.involutionhell.backend.rag.indexing.application;
 
-import com.involutionhell.backend.rag.indexing.model.RagChunkDraft;
-import com.involutionhell.backend.rag.indexing.model.RagIndexAttemptException;
-import com.involutionhell.backend.rag.indexing.model.RagIndexFailure;
-import com.involutionhell.backend.rag.indexing.model.RagIndexStage;
-import com.involutionhell.backend.rag.indexing.model.RagTextChunk;
 import com.involutionhell.backend.rag.document.spi.DocumentIndexingSpi;
 import com.involutionhell.backend.rag.document.spi.DocumentIndexingView;
+import com.involutionhell.backend.rag.indexing.model.*;
+import com.involutionhell.backend.rag.indexing.persistence.*;
 import com.involutionhell.backend.rag.indexing.service.RagIndexingFailureClassifier;
 import com.involutionhell.backend.rag.indexing.service.RagIndexingMetrics;
 import com.involutionhell.backend.rag.indexing.service.RagMilvusVectorIndexer;
 import com.involutionhell.backend.rag.indexing.service.RagTextChunker;
-import com.involutionhell.backend.rag.shared.properties.RagProperties;
-import com.involutionhell.backend.rag.indexing.persistence.RagChunkRepository;
-import com.involutionhell.backend.rag.indexing.persistence.RagChunkRecord;
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRepository;
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobTransitionRepository;
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexOutboxRepository;
-import com.involutionhell.backend.rag.shared.metadata.RagChunkMetadataHelper;
-import com.involutionhell.backend.rag.shared.model.RagDocumentStatus;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowCommand;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowService;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowState;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowTriggerType;
-import com.involutionhell.backend.rag.shared.support.RagJsonCodec;
+import com.involutionhell.backend.rag.shared.model.RagDocumentStatus;
+import com.involutionhell.backend.rag.shared.properties.RagProperties;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
+import io.milvus.v2.exception.ErrorCode;
+import io.milvus.v2.exception.MilvusClientException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.time.OffsetDateTime;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 负责将原始文档切片并写入 PostgreSQL / Milvus。
@@ -49,48 +39,39 @@ public class RagIndexingService {
     private final DocumentIndexingSpi documentIndexingSpi;
     private final RagChunkRepository chunkRepository;
     private final RagTextChunker chunker;
-    private final ObjectProvider<VectorStore> vectorStoreProvider;
     private final ObjectProvider<RagMilvusVectorIndexer> milvusVectorIndexerProvider;
     private final RagIndexJobRepository indexJobRepository;
     private final RagIndexOutboxRepository indexOutboxRepository;
     private final RagIndexJobTransitionRepository indexJobTransitionRepository;
     private final IndexWorkflowService workflowService;
-    private final RagJsonCodec jsonCodec;
     private final RagProperties ragProperties;
     private final RagIndexingFailureClassifier failureClassifier;
     private final RagIndexingMetrics indexingMetrics;
-    private final RagChunkMetadataHelper metadataHelper;
 
     public RagIndexingService(
             DocumentIndexingSpi documentIndexingSpi,
             RagChunkRepository chunkRepository,
             RagTextChunker chunker,
-            ObjectProvider<VectorStore> vectorStoreProvider,
             ObjectProvider<RagMilvusVectorIndexer> milvusVectorIndexerProvider,
             RagIndexJobRepository indexJobRepository,
             RagIndexOutboxRepository indexOutboxRepository,
             RagIndexJobTransitionRepository indexJobTransitionRepository,
             IndexWorkflowService workflowService,
-            RagJsonCodec jsonCodec,
             RagProperties ragProperties,
             RagIndexingFailureClassifier failureClassifier,
-            RagIndexingMetrics indexingMetrics,
-            RagChunkMetadataHelper metadataHelper
+            RagIndexingMetrics indexingMetrics
     ) {
         this.documentIndexingSpi = documentIndexingSpi;
         this.chunkRepository = chunkRepository;
         this.chunker = chunker;
-        this.vectorStoreProvider = vectorStoreProvider;
         this.milvusVectorIndexerProvider = milvusVectorIndexerProvider;
         this.indexJobRepository = indexJobRepository;
         this.indexOutboxRepository = indexOutboxRepository;
         this.indexJobTransitionRepository = indexJobTransitionRepository;
         this.workflowService = workflowService;
-        this.jsonCodec = jsonCodec;
         this.ragProperties = ragProperties;
         this.failureClassifier = failureClassifier;
         this.indexingMetrics = indexingMetrics;
-        this.metadataHelper = metadataHelper;
     }
 
     /**
@@ -219,7 +200,7 @@ public class RagIndexingService {
      * 删除指定文档已有的切片和向量索引，供删除文档或重建前清理使用。
      */
     public void deleteDocumentIndex(Long documentId) {
-        deleteDocumentIndex(documentId, currentVectorStore(), currentMilvusVectorIndexer());
+        deleteDocumentIndex(documentId, currentMilvusVectorIndexer());
     }
 
     /**
@@ -240,13 +221,11 @@ public class RagIndexingService {
             AtomicReference<IndexWorkflowState> currentState,
             AtomicBoolean vectorWriteApplied
     ) {
-        VectorStore vectorStore = currentVectorStore();
         RagMilvusVectorIndexer milvusVectorIndexer = currentMilvusVectorIndexer();
         Long previousActiveGeneration = document.indexedGeneration();
         validateIndexableDocument(loadDocument(documentId), document.contentSha256(), false);
-        cleanupDanglingGenerationsBeforeIndex(documentId, previousActiveGeneration, vectorStore, milvusVectorIndexer);
-        validateIndexableDocument(loadDocument(documentId), document.contentSha256(), false);
-        deletePendingGeneration(documentId, indexGeneration, previousActiveGeneration, vectorStore, milvusVectorIndexer);
+        cleanupDanglingGenerationsBeforeIndex(documentId, previousActiveGeneration, milvusVectorIndexer);
+        deletePendingGeneration(documentId, indexGeneration, previousActiveGeneration, milvusVectorIndexer);
 
         workflowService.enterChunking(workflowCommand.withMetadata("phase", "chunking"));
         currentState.set(IndexWorkflowState.CHUNKING);
@@ -285,46 +264,33 @@ public class RagIndexingService {
                 savedChunks.size(),
                 currentMaxChunkIndex
         );
-        validateIndexableDocument(loadDocument(documentId), document.contentSha256(), true);
 
-        if (vectorStore != null) {
-            workflowService.enterVectorIndexing(
-                    workflowCommand
-                            .withMetadata("phase", "vector_indexing")
-                            .withChunkCount(savedChunks.size())
-            );
-            currentState.set(IndexWorkflowState.VECTOR_INDEXING);
-        }
+        workflowService.enterVectorIndexing(
+                workflowCommand
+                        .withMetadata("phase", "vector_indexing")
+                        .withChunkCount(savedChunks.size())
+        );
+        currentState.set(IndexWorkflowState.VECTOR_INDEXING);
+
         workflowService.enterCommitIndex(
                 workflowCommand
                         .withMetadata("phase", "commit_index")
                         .withChunkCount(savedChunks.size())
         );
         currentState.set(IndexWorkflowState.COMMIT_INDEX);
+
+        milvusVectorIndexer.add(document, savedChunks);
+        vectorWriteApplied.set(true);
+        log.debug(
+                "RAG 向量提交完成。documentId={}, targetGeneration={}, chunkCount={}, usedCustomMilvusIndexer={}",
+                documentId,
+                indexGeneration,
+                savedChunks.size(),
+                milvusVectorIndexer
+        );
+
         validateIndexableDocument(loadDocument(documentId), document.contentSha256(), true);
-        if (vectorStore != null) {
-            long vectorWriteStartedAt = System.nanoTime();
-            if (milvusVectorIndexer == null || !milvusVectorIndexer.add(document, savedChunks)) {
-                vectorStore.add(savedChunks.stream()
-                        .map(chunk -> toVectorDocument(document, chunk))
-                        .toList());
-                indexingMetrics.recordMilvusWrite(
-                        savedChunks.size(),
-                        Duration.ofNanos(System.nanoTime() - vectorWriteStartedAt),
-                        false
-                );
-            }
-            vectorWriteApplied.set(true);
-            log.debug(
-                    "RAG 向量提交完成。documentId={}, targetGeneration={}, chunkCount={}, usedCustomMilvusIndexer={}",
-                    documentId,
-                    indexGeneration,
-                    savedChunks.size(),
-                    milvusVectorIndexer != null
-            );
-        }
-        validateIndexableDocument(loadDocument(documentId), document.contentSha256(), true);
-        cleanupObsoleteGenerations(documentId, indexGeneration, currentMaxChunkIndex, vectorStore, milvusVectorIndexer);
+        cleanupObsoleteGenerations(documentId, indexGeneration, currentMaxChunkIndex, milvusVectorIndexer);
         workflowService.succeed(
                 workflowCommand
                         .withTargetGeneration(indexGeneration)
@@ -376,23 +342,6 @@ public class RagIndexingService {
 
     private String buildStableVectorId(Long documentId, int chunkIndex) {
         return "rag-" + documentId + "-" + chunkIndex;
-    }
-
-    private Document toVectorDocument(DocumentIndexingView document, RagChunkRecord chunk) {
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.putAll(parseChunkMetadata(chunk.metadata()));
-        metadata.put("vectorId", chunk.vectorId());
-        metadata.put("documentId", document.id());
-        metadata.put("indexGeneration", chunk.indexGeneration());
-        metadata.put("sourceType", document.sourceType());
-        metadata.put("sourceUri", defaultString(document.sourceUri()));
-        metadata.put("title", defaultString(document.title()));
-        metadata.put("chunkIndex", chunk.chunkIndex());
-        return new Document(chunk.vectorId(), chunk.chunkText(), metadata);
-    }
-
-    private Map<String, Object> parseChunkMetadata(Map<String, Object> metadata) {
-        return metadata == null ? Map.of() : new LinkedHashMap<>(metadata);
     }
 
     private String defaultString(String value) {
@@ -456,7 +405,7 @@ public class RagIndexingService {
         }
         try {
             Map<String, Object> metadata = new LinkedHashMap<>(documentMetadata);
-            if (metadata == null || metadata.isEmpty()) {
+            if (metadata.isEmpty()) {
                 return List.of();
             }
 
@@ -478,7 +427,6 @@ public class RagIndexingService {
             return List.of();
         }
         return rawList.stream()
-                .filter(item -> item != null)
                 .map(String::valueOf)
                 .filter(item -> !item.isBlank())
                 .toList();
@@ -493,7 +441,6 @@ public class RagIndexingService {
             Long documentId,
             long indexGeneration,
             Long preservedGeneration,
-            VectorStore vectorStore,
             RagMilvusVectorIndexer milvusVectorIndexer
     ) {
         if (preservedGeneration == null) {
@@ -504,7 +451,7 @@ public class RagIndexingService {
                     indexGeneration,
                     sameGenerationVectorIds.size()
             );
-            deleteVectorIds(sameGenerationVectorIds, vectorStore, milvusVectorIndexer, "pending-generation");
+            deleteVectorIds(sameGenerationVectorIds, milvusVectorIndexer, "pending-generation");
         } else {
             Integer preservedMaxChunkIndex = chunkRepository.findMaxChunkIndexByDocumentIdAndGeneration(documentId, preservedGeneration);
             Integer pendingMaxChunkIndex = chunkRepository.findMaxChunkIndexByDocumentIdAndGeneration(documentId, indexGeneration);
@@ -520,7 +467,6 @@ public class RagIndexingService {
                     documentId,
                     normalizedNextChunkIndex(preservedMaxChunkIndex),
                     pendingMaxChunkIndex,
-                    vectorStore,
                     milvusVectorIndexer,
                     "pending-generation-tail"
             );
@@ -531,7 +477,6 @@ public class RagIndexingService {
     private void cleanupDanglingGenerationsBeforeIndex(
             Long documentId,
             Long activeGeneration,
-            VectorStore vectorStore,
             RagMilvusVectorIndexer milvusVectorIndexer
     ) {
         if (activeGeneration == null) {
@@ -541,7 +486,7 @@ public class RagIndexingService {
                     documentId,
                     previousVectorIds.size()
             );
-            deleteVectorIds(previousVectorIds, vectorStore, milvusVectorIndexer, "pre-index-all");
+            deleteVectorIds(previousVectorIds, milvusVectorIndexer, "pre-index-all");
             chunkRepository.deleteByDocumentId(documentId);
             return;
         }
@@ -559,7 +504,6 @@ public class RagIndexingService {
                 documentId,
                 normalizedNextChunkIndex(activeMaxChunkIndex),
                 danglingMaxChunkIndex,
-                vectorStore,
                 milvusVectorIndexer,
                 "pre-index-non-active-tail"
         );
@@ -572,39 +516,27 @@ public class RagIndexingService {
             Long previousActiveGeneration,
             boolean vectorWriteApplied
     ) {
-        try {
-            VectorStore vectorStore = currentVectorStore();
-            RagMilvusVectorIndexer milvusVectorIndexer = currentMilvusVectorIndexer();
-            if (vectorWriteApplied && previousActiveGeneration != null) {
-                log.info(
-                        "检测到新向量已写入但索引提交失败，开始恢复 active generation。documentId={}, failedGeneration={}, previousActiveGeneration={}",
-                        documentId,
-                        failedGeneration,
-                        previousActiveGeneration
-                );
-                restoreActiveGenerationVectors(documentId, previousActiveGeneration, vectorStore, milvusVectorIndexer);
-            }
-            deletePendingGeneration(
+        RagMilvusVectorIndexer milvusVectorIndexer = currentMilvusVectorIndexer();
+        if (vectorWriteApplied && previousActiveGeneration != null) {
+            log.info(
+                    "检测到新向量已写入但索引提交失败，开始恢复 active generation。documentId={}, failedGeneration={}, previousActiveGeneration={}",
                     documentId,
                     failedGeneration,
-                    previousActiveGeneration,
-                    vectorStore,
-                    milvusVectorIndexer
+                    previousActiveGeneration
             );
-        } catch (Exception cleanupException) {
-            log.warn(
-                    "RAG 文档失败 generation 清理失败。documentId={}, failedGeneration={}, error={}",
-                    documentId,
-                    failedGeneration,
-                    cleanupException.getMessage()
-            );
+            restoreActiveGenerationVectors(documentId, previousActiveGeneration, milvusVectorIndexer);
         }
+        deletePendingGeneration(
+                documentId,
+                failedGeneration,
+                previousActiveGeneration,
+                milvusVectorIndexer
+        );
     }
 
     private void restoreActiveGenerationVectors(
             Long documentId,
             Long activeGeneration,
-            VectorStore vectorStore,
             RagMilvusVectorIndexer milvusVectorIndexer
     ) {
         List<RagChunkRecord> activeChunks = chunkRepository.findByDocumentIdAndGeneration(documentId, activeGeneration);
@@ -626,29 +558,13 @@ public class RagIndexingService {
                 activeGeneration,
                 activeChunks.size()
         );
-        if (milvusVectorIndexer != null) {
-            if (milvusVectorIndexer.add(document, activeChunks)) {
-                return;
-            }
-        }
-        if (vectorStore != null) {
-            vectorStore.add(activeChunks.stream()
-                    .map(chunk -> toVectorDocument(document, chunk))
-                    .toList());
-            return;
-        }
-        log.debug(
-                "当前未启用向量存储，跳过 active generation 恢复。documentId={}, activeGeneration={}",
-                documentId,
-                activeGeneration
-        );
+        milvusVectorIndexer.add(document, activeChunks);
     }
 
     private void cleanupObsoleteGenerations(
             Long documentId,
             long activeGeneration,
             int activeMaxChunkIndex,
-            VectorStore vectorStore,
             RagMilvusVectorIndexer milvusVectorIndexer
     ) {
         Integer obsoleteMaxChunkIndex = chunkRepository.findMaxChunkIndexByDocumentIdExceptGeneration(documentId, activeGeneration);
@@ -663,31 +579,14 @@ public class RagIndexingService {
                 documentId,
                 activeMaxChunkIndex + 1,
                 obsoleteMaxChunkIndex,
-                vectorStore,
                 milvusVectorIndexer,
                 "obsolete-generation-tail"
         );
         chunkRepository.deleteByDocumentIdExceptGeneration(documentId, activeGeneration);
     }
 
-    private void deleteDocumentIndex(
-            Long documentId,
-            VectorStore vectorStore,
-            RagMilvusVectorIndexer milvusVectorIndexer
-    ) {
-        List<String> previousVectorIds = chunkRepository.findVectorIdsByDocumentId(documentId);
-        log.info(
-                "RAG document index cleanup started: documentId={}, vectorCount={}",
-                documentId,
-                previousVectorIds.size()
-        );
-        deleteVectorIds(previousVectorIds, vectorStore, milvusVectorIndexer, "document-delete");
-        chunkRepository.deleteByDocumentId(documentId);
-    }
-
     private void deleteVectorIds(
             List<String> vectorIds,
-            VectorStore vectorStore,
             RagMilvusVectorIndexer milvusVectorIndexer,
             String phase
     ) {
@@ -705,27 +604,15 @@ public class RagIndexingService {
             milvusVectorIndexer.delete(normalizedVectorIds);
             return;
         }
-        if (vectorStore != null) {
-            try {
-                vectorStore.delete(normalizedVectorIds);
-            } catch (Exception exception) {
-                String message = exception.getMessage();
-                if (message != null && message.toLowerCase(Locale.ROOT).contains("collection not found")) {
-                    log.warn("Milvus 集合不存在，跳过向量删除。phase={}, vectorCount={}", phase, normalizedVectorIds.size());
-                    return;
-                }
-                throw exception;
-            }
-            return;
-        }
-        log.debug("当前未启用向量删除。phase={}, vectorCount={}", phase, normalizedVectorIds.size());
+        throw new MilvusClientException(ErrorCode.CLIENT_ERROR,
+                "Milvus 向量删除器未装配，无法执行向量删除: phase=" + phase + ", vectorCount=" + normalizedVectorIds.size()
+        );
     }
 
     private void deleteStableTailVectors(
             Long documentId,
             int fromChunkIndexInclusive,
             Integer toChunkIndexInclusive,
-            VectorStore vectorStore,
             RagMilvusVectorIndexer milvusVectorIndexer,
             String phase
     ) {
@@ -745,25 +632,36 @@ public class RagIndexingService {
                 toChunkIndexInclusive,
                 stableVectorIds.size()
         );
-        deleteVectorIds(stableVectorIds, vectorStore, milvusVectorIndexer, phase);
+        deleteVectorIds(stableVectorIds, milvusVectorIndexer, phase);
     }
 
     private int normalizedNextChunkIndex(Integer maxChunkIndex) {
         return maxChunkIndex == null ? 0 : maxChunkIndex + 1;
     }
 
-    private VectorStore currentVectorStore() {
-        if (!ragProperties.milvus().enabled()) {
-            return null;
-        }
-        return vectorStoreProvider.getIfAvailable();
-    }
-
     private RagMilvusVectorIndexer currentMilvusVectorIndexer() {
         if (!ragProperties.milvus().enabled()) {
-            return null;
+            throw new IllegalStateException("当前索引流程要求启用 Milvus，但 rag.milvus.enabled=false");
         }
-        return milvusVectorIndexerProvider.getIfAvailable();
+        RagMilvusVectorIndexer indexer = milvusVectorIndexerProvider.getIfAvailable();
+        if (indexer == null) {
+            throw new IllegalStateException("rag.milvus.enabled=true 但 RagMilvusVectorIndexer 未装配");
+        }
+        return indexer;
+    }
+
+    // 替换原有的 deleteDocumentIndex 方法
+    private void deleteDocumentIndex(
+            Long documentId,
+            RagMilvusVectorIndexer milvusVectorIndexer
+    ) {
+        log.info("RAG document index cleanup started: documentId={}", documentId);
+
+        // 1. 优先使用 Milvus 原生表达式删除（最安全、最彻底）
+        milvusVectorIndexer.deleteByDocumentId(documentId);
+        log.debug("Milvus vectors deleted by expression for documentId={}", documentId);
+        // 3. 最后无脑清理本地 Chunk 记录（无论前两步发生什么，都不影响这里）
+        chunkRepository.deleteByDocumentId(documentId);
     }
 
     private void validateIndexableDocument(

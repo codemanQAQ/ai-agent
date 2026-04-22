@@ -7,13 +7,13 @@ import com.involutionhell.backend.rag.indexing.model.RagChunkDraft;
 import com.involutionhell.backend.rag.shared.support.RagJsonCodec;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -21,8 +21,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,48 +43,15 @@ public class JdbcRagChunkRepository implements RagChunkRepository {
     @Override
     @Transactional
     public List<RagChunkRecord> saveAll(Long documentId, List<RagChunkDraft> chunks) {
-        // 批量写切片时保持事务一致性，避免只写入部分 chunk 造成脏 generation。
-        List<RagChunkRecord> saved = new ArrayList<>();
-        for (RagChunkDraft chunk : chunks) {
-            KeyHolder keyHolder = new GeneratedKeyHolder();
-            jdbc.update(connection -> {
-                PreparedStatement statement = connection.prepareStatement(insertSql(connection), Statement.RETURN_GENERATED_KEYS);
-                statement.setLong(1, documentId);
-                statement.setLong(2, chunk.indexGeneration());
-                statement.setInt(3, chunk.chunkIndex());
-                statement.setString(4, chunk.chunkText());
-                statement.setString(5, chunk.chunkHash());
-                statement.setInt(6, chunk.charCount());
-                if (chunk.tokenCount() == null) {
-                    statement.setObject(7, null);
-                } else {
-                    statement.setInt(7, chunk.tokenCount());
-                }
-                statement.setString(8, chunk.vectorId());
-                bindMetadata(statement, connection, 9, chunk.metadata());
-                return statement;
-            }, keyHolder);
-
-            Number id = extractId(keyHolder);
-            if (id == null) {
-                throw new IllegalStateException("创建 RAG 切片失败，未返回主键");
-            }
-            saved.add(new RagChunkRecord(
-                    id.longValue(),
-                    documentId,
-                    chunk.indexGeneration(),
-                    chunk.chunkIndex(),
-                    chunk.chunkText(),
-                    chunk.chunkHash(),
-                    chunk.charCount(),
-                    chunk.tokenCount(),
-                    chunk.vectorId(),
-                    chunk.metadata(),
-                    null,
-                    null
-            ));
+        if (chunks == null || chunks.isEmpty()) {
+            return List.of();
         }
-        return saved;
+        // 批量写切片时保持事务一致性，避免只写入部分 chunk 造成脏 generation。
+        if (isPostgreSql()) {
+            return insertAllPostgreSql(documentId, chunks);
+        }
+        insertAllBatch(documentId, chunks);
+        return reloadInsertedChunks(documentId, chunks);
     }
 
     @Override
@@ -424,6 +389,88 @@ public class JdbcRagChunkRepository implements RagChunkRepository {
                 """;
     }
 
+    private List<RagChunkRecord> insertAllPostgreSql(Long documentId, List<RagChunkDraft> chunks) {
+        String placeholders = chunks.stream()
+                .map(chunk -> "(?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))")
+                .collect(Collectors.joining(", "));
+        String sql = """
+                INSERT INTO rag_chunks (
+                    document_id, index_generation, chunk_index, chunk_text, chunk_hash, char_count, token_count, vector_id, metadata
+                ) VALUES
+                """
+                + placeholders
+                + """
+                
+                RETURNING id, document_id, index_generation, chunk_index, chunk_text, chunk_hash, char_count, token_count, vector_id, metadata,
+                          created_at, updated_at
+                """;
+
+        return jdbc.query(connection -> {
+            PreparedStatement statement = connection.prepareStatement(sql);
+            int parameterIndex = 1;
+            for (RagChunkDraft chunk : chunks) {
+                statement.setLong(parameterIndex++, documentId);
+                statement.setLong(parameterIndex++, chunk.indexGeneration());
+                statement.setInt(parameterIndex++, chunk.chunkIndex());
+                statement.setString(parameterIndex++, chunk.chunkText());
+                statement.setString(parameterIndex++, chunk.chunkHash());
+                statement.setInt(parameterIndex++, chunk.charCount());
+                if (chunk.tokenCount() == null) {
+                    statement.setObject(parameterIndex++, null);
+                } else {
+                    statement.setInt(parameterIndex++, chunk.tokenCount());
+                }
+                statement.setString(parameterIndex++, chunk.vectorId());
+                bindMetadata(statement, connection, parameterIndex++, chunk.metadata());
+            }
+            return statement;
+        }, chunkRowMapper());
+    }
+
+    private void insertAllBatch(Long documentId, List<RagChunkDraft> chunks) {
+        jdbc.batchUpdate(
+                """
+                INSERT INTO rag_chunks (
+                    document_id, index_generation, chunk_index, chunk_text, chunk_hash, char_count, token_count, vector_id, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                chunks,
+                chunks.size(),
+                (statement, chunk) -> {
+                    statement.setLong(1, documentId);
+                    statement.setLong(2, chunk.indexGeneration());
+                    statement.setInt(3, chunk.chunkIndex());
+                    statement.setString(4, chunk.chunkText());
+                    statement.setString(5, chunk.chunkHash());
+                    statement.setInt(6, chunk.charCount());
+                    if (chunk.tokenCount() == null) {
+                        statement.setObject(7, null);
+                    } else {
+                        statement.setInt(7, chunk.tokenCount());
+                    }
+                    statement.setString(8, chunk.vectorId());
+                    statement.setString(9, chunk.metadata() == null ? null : jsonCodec.write(chunk.metadata()));
+                }
+        );
+    }
+
+    private List<RagChunkRecord> reloadInsertedChunks(Long documentId, List<RagChunkDraft> chunks) {
+        Long indexGeneration = chunks.getFirst().indexGeneration();
+        List<RagChunkRecord> inserted = findByDocumentIdAndGeneration(documentId, indexGeneration);
+        Set<Integer> expectedChunkIndexes = chunks.stream()
+                .map(RagChunkDraft::chunkIndex)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<RagChunkRecord> filtered = inserted.stream()
+                .filter(record -> expectedChunkIndexes.contains(record.chunkIndex()))
+                .toList();
+        if (filtered.size() != chunks.size()) {
+            throw new IllegalStateException(
+                    "批量创建 RAG 切片后回查数量不一致: expected=" + chunks.size() + ", actual=" + filtered.size()
+            );
+        }
+        return filtered;
+    }
+
     private void bindMetadata(PreparedStatement statement, Connection connection, int index, Map<String, Object> metadataJson)
             throws java.sql.SQLException {
         // PostgreSQL 使用 jsonb，H2 测试环境退化为普通字符串列。
@@ -473,16 +520,6 @@ public class JdbcRagChunkRepository implements RagChunkRepository {
 
     private boolean isPostgreSql(Connection connection) throws java.sql.SQLException {
         return connection.getMetaData().getDatabaseProductName().toLowerCase().contains("postgresql");
-    }
-
-    private Number extractId(KeyHolder keyHolder) {
-        if (keyHolder.getKeys() != null) {
-            Object id = keyHolder.getKeys().get("id");
-            if (id instanceof Number number) {
-                return number;
-            }
-        }
-        return keyHolder.getKey();
     }
 
     private boolean isPostgreSql() {

@@ -1,5 +1,4 @@
 -- Java 侧自管理的用户账号表（Sa-Token 认证，非 Auth.js OAuth 用户）
--- 与 Prisma 管理的 users 表相互独立
 CREATE TABLE IF NOT EXISTS user_accounts (
     id            BIGSERIAL PRIMARY KEY,
     username      VARCHAR(255) NOT NULL UNIQUE,

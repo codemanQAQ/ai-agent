@@ -25,6 +25,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.StringUtils;
 
+import java.util.concurrent.TimeUnit;
+
 /**
  * RAG 模块基础配置。
  *
@@ -203,6 +205,8 @@ public class RagConfiguration {
         return new MilvusServiceClient(ConnectParam.newBuilder()
                 .withToken(ragProperties.milvus().token())
                 .withUri(ragProperties.milvus().uri())
+                .withConnectTimeout(10, TimeUnit.SECONDS)
+                .withKeepAliveTime(100, TimeUnit.SECONDS)
                 .build());
     }
 }

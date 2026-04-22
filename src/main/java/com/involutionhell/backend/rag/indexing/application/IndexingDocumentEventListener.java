@@ -16,7 +16,7 @@ class IndexingDocumentEventListener {
         this.indexingCommandFacade = indexingCommandFacade;
     }
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     void onDocumentIndexRequested(DocumentIndexRequestedEvent event) {
         indexingCommandFacade.requestIndexing(
                 event.documentId(),
@@ -25,7 +25,7 @@ class IndexingDocumentEventListener {
         );
     }
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.BEFORE_COMMIT)
     void onDocumentIndexCleanupRequested(DocumentIndexCleanupRequestedEvent event) {
         indexingCommandFacade.cleanupPendingIndexing(event.documentId());
     }

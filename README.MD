@@ -181,6 +181,39 @@ curl -X POST http://127.0.0.1:8080/api/v1/public/rag/ask \
 - `rag_index_message_failures`
 - `rag.indexing.message.parse_failure.count`
 
+### 当前已识别风险：消费幂等缺口
+
+当前 `RagIndexMessageListener` 在进入 `ragIndexingService.indexDocument(...)` 之前，还没有“消费权原子抢占”这一层前置拦截。  
+这意味着在以下场景下，重复消息可能会重复执行昂贵的切片和 embedding：
+
+- RocketMQ 因 ACK 丢失、网络抖动或消费确认失败而重发同一条消息
+- 定时补偿任务和 MQ 重投在时间窗口内撞到同一 `documentId + contentSha256`
+- 两个消费者几乎同时读取到同一个 `QUEUED / DISPATCHING` 状态，并同时推进到 `START_ATTEMPT`
+
+风险后果：
+
+- 同一文档版本可能被重复调用 embedding 模型
+- 最终结果虽然通常会因 stable `vectorId` / generation 收敛，但会重复消耗模型额度和索引时间
+- 在 RAG 场景下，这类重复计算会直接转化为成本浪费
+
+当前仅靠“已成功再重投时的状态收敛”是不够的；因为它不能阻止并发中的重复消费。
+
+### 建议修法
+
+建议采用两层幂等保护：
+
+1. 快速短路  
+   在消费入口先检查：
+   - 当前 `documentId + contentSha256` 是否已经是 `SUCCEEDED`
+   - 当前 `messageId` 是否已经被标记为 `CONSUMED`
+
+2. 原子抢占执行权  
+   在真正进入 `indexDocument(...)` 前，通过数据库执行一次原子 claim：
+   - 仅允许一个消费者把 job 从 `QUEUED / DISPATCHING` 抢占到可执行状态
+   - 抢占失败的消费者直接视为重复投递，记录日志后返回 `ConsumeResult.SUCCESS`
+
+只有“快速短路 + 原子抢占”同时存在，才能真正把重复烧钱的问题挡在 embedding 之前。
+
 ## RAG 执行计划
 
 > [!NOTE]

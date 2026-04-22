@@ -3,6 +3,7 @@ package com.involutionhell.backend.rag.retrieval.service;
 import com.involutionhell.backend.rag.retrieval.api.RagConversationMessage;
 import com.involutionhell.backend.rag.shared.properties.RagProperties;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
+import com.involutionhell.backend.rag.shared.support.RagOpenAiTokenCounter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -32,13 +33,16 @@ public class RagQueryTransformer {
     private final RagProperties ragProperties;
     private final CompressionQueryTransformer compressionQueryTransformer;
     private final RewriteQueryTransformer rewriteQueryTransformer;
+    private final RagOpenAiTokenCounter tokenCounter;
 
     public RagQueryTransformer(
             ObjectProvider<RewriteQueryTransformer> rewriteQueryTransformerProvider,
             ObjectProvider<CompressionQueryTransformer> compressionQueryTransformerProvider,
-            RagProperties ragProperties
+            RagProperties ragProperties,
+            RagOpenAiTokenCounter tokenCounter
     ) {
         this.ragProperties = ragProperties;
+        this.tokenCounter = tokenCounter;
         this.rewriteQueryTransformer = resolveRewriteQueryTransformer(rewriteQueryTransformerProvider);
         this.compressionQueryTransformer = resolveCompressionQueryTransformer(compressionQueryTransformerProvider);
     }
@@ -228,10 +232,6 @@ public class RagQueryTransformer {
     }
 
     private int approximateTokenCount(String text) {
-        String trimmed = text == null ? "" : text.trim();
-        if (trimmed.isEmpty()) {
-            return 0;
-        }
-        return trimmed.split("\\s+").length;
+        return tokenCounter.count(text);
     }
 }

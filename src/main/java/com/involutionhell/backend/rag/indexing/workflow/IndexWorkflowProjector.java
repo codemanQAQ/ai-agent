@@ -5,6 +5,8 @@ import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRepository
 import com.involutionhell.backend.rag.indexing.model.RagIndexStage;
 import java.time.OffsetDateTime;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 把工作流状态投影到 rag_documents 与 rag_index_jobs。
@@ -26,6 +28,7 @@ public class IndexWorkflowProjector {
     /**
      * 将状态机跃迁结果写回现有业务表。
      */
+    @Transactional(propagation = Propagation.REQUIRED)
     public void project(
             IndexWorkflowState fromState,
             IndexWorkflowState toState,

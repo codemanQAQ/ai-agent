@@ -3,6 +3,7 @@ package com.involutionhell.backend.rag.indexing.service;
 import com.involutionhell.backend.rag.indexing.model.RagTextChunk;
 import com.involutionhell.backend.rag.shared.markdown.MarkdownDocumentParser;
 import com.involutionhell.backend.rag.shared.properties.RagProperties;
+import com.involutionhell.backend.rag.shared.support.RagOpenAiTokenCounter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -22,10 +23,16 @@ public class RagTextChunker {
 
     private final RagProperties properties;
     private final MarkdownDocumentParser markdownDocumentParser;
+    private final RagOpenAiTokenCounter tokenCounter;
 
-    public RagTextChunker(RagProperties properties, MarkdownDocumentParser markdownDocumentParser) {
+    public RagTextChunker(
+            RagProperties properties,
+            MarkdownDocumentParser markdownDocumentParser,
+            RagOpenAiTokenCounter tokenCounter
+    ) {
         this.properties = properties;
         this.markdownDocumentParser = markdownDocumentParser;
+        this.tokenCounter = tokenCounter;
     }
 
     /**
@@ -409,11 +416,7 @@ public class RagTextChunker {
     }
 
     private int approximateTokenCount(String text) {
-        String trimmed = text.trim();
-        if (trimmed.isEmpty()) {
-            return 0;
-        }
-        return trimmed.split("\\s+").length;
+        return tokenCounter.count(text);
     }
 
     private String sha256Hex(String value) {

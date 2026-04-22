@@ -1,14 +1,12 @@
 package com.involutionhell.backend.rag.indexing.workflow;
 
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRepository;
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobTransitionRepository;
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexOutboxRepository;
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRecord;
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexOutboxRecord;
-import com.involutionhell.backend.rag.shared.support.RagJsonCodec;
+import com.involutionhell.backend.rag.indexing.persistence.*;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
-import org.springframework.stereotype.Service;
 
 /**
  * 写入索引工作流转移审计。
@@ -23,8 +21,7 @@ public class IndexWorkflowAuditService {
     public IndexWorkflowAuditService(
             RagIndexJobTransitionRepository transitionRepository,
             RagIndexJobRepository jobRepository,
-            RagIndexOutboxRepository outboxRepository,
-            RagJsonCodec jsonCodec
+            RagIndexOutboxRepository outboxRepository
     ) {
         this.transitionRepository = transitionRepository;
         this.jobRepository = jobRepository;
@@ -34,6 +31,7 @@ public class IndexWorkflowAuditService {
     /**
      * 记录一次工作流跃迁。
      */
+    @Transactional(propagation = Propagation.REQUIRED)
     public void record(
             IndexWorkflowState fromState,
             IndexWorkflowState toState,

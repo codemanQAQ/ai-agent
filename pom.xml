@@ -133,6 +133,13 @@
             <version>${org.mapstruct.version}</version>
         </dependency>
 
+        <!-- OpenAI-compatible tokenizer -->
+        <dependency>
+            <groupId>com.knuddels</groupId>
+            <artifactId>jtokkit</artifactId>
+            <version>1.1.0</version>
+        </dependency>
+
         <!-- configuration metadata for modulith canvases -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

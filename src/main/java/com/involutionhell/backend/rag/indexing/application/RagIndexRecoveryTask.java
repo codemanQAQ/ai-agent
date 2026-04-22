@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 宏观补偿任务：恢复长期停留在 PENDING / PROCESSING / FAILED 的文档。
@@ -42,6 +43,7 @@ public class RagIndexRecoveryTask {
     private final RagIndexOutboxService outboxService;
     private final RagIndexingService indexingService;
     private final RagIndexingMetrics indexingMetrics;
+    private final TransactionTemplate transactionTemplate;
 
     public RagIndexRecoveryTask(
             RagProperties ragProperties,
@@ -50,7 +52,8 @@ public class RagIndexRecoveryTask {
             IndexWorkflowService workflowService,
             RagIndexOutboxService outboxService,
             RagIndexingService indexingService,
-            RagIndexingMetrics indexingMetrics
+            RagIndexingMetrics indexingMetrics,
+            TransactionTemplate transactionTemplate
     ) {
         this.ragProperties = ragProperties;
         this.documentIndexingSpi = documentIndexingSpi;
@@ -59,6 +62,7 @@ public class RagIndexRecoveryTask {
         this.outboxService = outboxService;
         this.indexingService = indexingService;
         this.indexingMetrics = indexingMetrics;
+        this.transactionTemplate = transactionTemplate;
     }
 
     @Scheduled(fixedDelayString = "${rag.recovery.fixed-delay-millis:60000}")
@@ -116,6 +120,7 @@ public class RagIndexRecoveryTask {
     private int requeueDocuments(List<DocumentIndexingView> documents, String reason, String category) {
         int count = 0;
         for (DocumentIndexingView document : documents) {
+
             if (RagDocumentStatus.DELETING.name().equals(document.status())) {
                 indexingMetrics.recordRecoveryOutcome(category, "skip");
                 continue;
@@ -128,10 +133,10 @@ public class RagIndexRecoveryTask {
                         document.id(),
                         RagLogHelper.shortSha(document.contentSha256()),
                         document.status(),
-                        job == null ? null : job.status(),
-                        job == null ? null : job.stage(),
-                        job == null ? null : job.lastEvent(),
-                        job == null ? null : job.attemptCount()
+                        job.status(),
+                        job.stage(),
+                        job.lastEvent(),
+                        job.attemptCount()
                 );
                 continue;
             }
@@ -147,9 +152,12 @@ public class RagIndexRecoveryTask {
                     )
                     .withNote(reason);
             try {
-                workflowService.queue(command);
-                workflowService.dispatch(command);
-                outboxService.enqueue(document.id(), document.contentSha256());
+
+                transactionTemplate.executeWithoutResult((status) -> {
+                    workflowService.queue(command);
+                    workflowService.dispatch(command);
+                    outboxService.enqueue(document.id(), document.contentSha256());
+                });
                 indexingMetrics.recordRecoveryOutcome(category, "success");
                 count++;
             } catch (Exception exception) {

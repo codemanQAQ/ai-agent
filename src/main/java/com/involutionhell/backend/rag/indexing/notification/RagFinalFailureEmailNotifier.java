@@ -46,7 +46,6 @@ public class RagFinalFailureEmailNotifier {
 
     private final DocumentIndexingSpi documentIndexingSpi;
     private final JavaMailSender mailSender;
-    private final RagJsonCodec jsonCodec;
     private final String from;
     private final String subjectPrefix;
     private final String baseUrl;
@@ -64,7 +63,6 @@ public class RagFinalFailureEmailNotifier {
                 mailSenderProvider.getIfAvailable(),
                 "JavaMailSender bean is required when final failure email notifier is enabled"
         );
-        this.jsonCodec = jsonCodec;
         this.from = from;
         this.subjectPrefix = subjectPrefix;
         this.baseUrl = baseUrl;

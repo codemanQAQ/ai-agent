@@ -15,6 +15,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 class IndexingCommandService implements IndexingCommandFacade {
@@ -29,7 +32,7 @@ class IndexingCommandService implements IndexingCommandFacade {
     private final RagProperties ragProperties;
     private final Executor ragVirtualThreadExecutor;
     private final RagIndexingMetrics indexingMetrics;
-
+    private  final TransactionTemplate transactionTemplate;
     IndexingCommandService(
             ObjectProvider<RagIndexOutboxService> indexOutboxServiceProvider,
             RagIndexEventPublisher indexEventPublisher,
@@ -38,6 +41,7 @@ class IndexingCommandService implements IndexingCommandFacade {
             DocumentIndexingSpi documentIndexingSpi,
             RagProperties ragProperties,
             @Qualifier("ragVirtualThreadExecutor") Executor ragVirtualThreadExecutor,
+            TransactionTemplate transactionTemplate,
             RagIndexingMetrics indexingMetrics
     ) {
         this.indexOutboxServiceProvider = indexOutboxServiceProvider;
@@ -47,9 +51,11 @@ class IndexingCommandService implements IndexingCommandFacade {
         this.documentIndexingSpi = documentIndexingSpi;
         this.ragProperties = ragProperties;
         this.ragVirtualThreadExecutor = ragVirtualThreadExecutor;
+        this.transactionTemplate = transactionTemplate;
         this.indexingMetrics = indexingMetrics;
     }
 
+    @Transactional(propagation = Propagation.REQUIRED,rollbackFor =  Exception.class)
     @Override
     public void requestIndexing(Long documentId, String contentSha256, String triggeredBy) {
         IndexWorkflowCommand command = IndexWorkflowCommand.of(
@@ -68,7 +74,9 @@ class IndexingCommandService implements IndexingCommandFacade {
         );
 
         try {
-            indexWorkflowService.queue(command);
+            transactionTemplate.executeWithoutResult(status -> {
+                indexWorkflowService.queue(command);
+            });
             if (!isOutboxDispatchMode()) {
                 indexWorkflowService.dispatch(command);
                 indexEventPublisher.publish(documentId, contentSha256);

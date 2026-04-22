@@ -271,26 +271,25 @@ public class RagIndexMessageListener implements RocketMQListener {
 
         // 进入这里说明 MQ 已经不再适合兜底，需要把最终失败状态和 outbox 消费确认在同一事务里落库。
         terminalStateService.failAndConfirmConsumed(finalCommand);
-        if (retryable) {
-            RagFinalFailureEmailNotifier notifier = finalFailureEmailNotifierProvider.getIfAvailable();
-            if (notifier != null) {
-                try {
-                    notifier.notifyFinalFailure(
-                            message.documentId(),
-                            message.contentSha256(),
-                            finalErrorMessage,
-                            maxAttempts,
-                            messageId
-                    );
-                } catch (Exception notifyException) {
-                    // 通知失败不应影响消费结果，仅记录告警
-                    log.warn(
-                            "RAG final failure email notification failed: messageId={}, documentId={}, error={}",
-                            messageId,
-                            message.documentId(),
-                            RagLogHelper.errorSummary(notifyException)
-                    );
-                }
+
+        RagFinalFailureEmailNotifier notifier = finalFailureEmailNotifierProvider.getIfAvailable();
+        if (notifier != null) {
+            try {
+                notifier.notifyFinalFailure(
+                        message.documentId(),
+                        message.contentSha256(),
+                        finalErrorMessage,
+                        maxAttempts,
+                        messageId
+                );
+            } catch (Exception notifyException) {
+                // 通知失败不应影响消费结果，仅记录告警
+                log.warn(
+                        "RAG final failure email notification failed: messageId={}, documentId={}, error={}",
+                        messageId,
+                        message.documentId(),
+                        RagLogHelper.errorSummary(notifyException)
+                );
             }
         }
 
