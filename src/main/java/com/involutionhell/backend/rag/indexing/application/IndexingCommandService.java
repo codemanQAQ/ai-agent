@@ -9,15 +9,18 @@ import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowService;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowTriggerType;
 import com.involutionhell.backend.rag.shared.properties.RagProperties;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
-import java.util.concurrent.Executor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
+
+import java.util.concurrent.Executor;
 
 @Service
 class IndexingCommandService implements IndexingCommandFacade {
@@ -32,7 +35,7 @@ class IndexingCommandService implements IndexingCommandFacade {
     private final RagProperties ragProperties;
     private final Executor ragVirtualThreadExecutor;
     private final RagIndexingMetrics indexingMetrics;
-    private  final TransactionTemplate transactionTemplate;
+
     IndexingCommandService(
             ObjectProvider<RagIndexOutboxService> indexOutboxServiceProvider,
             RagIndexEventPublisher indexEventPublisher,
@@ -51,11 +54,10 @@ class IndexingCommandService implements IndexingCommandFacade {
         this.documentIndexingSpi = documentIndexingSpi;
         this.ragProperties = ragProperties;
         this.ragVirtualThreadExecutor = ragVirtualThreadExecutor;
-        this.transactionTemplate = transactionTemplate;
         this.indexingMetrics = indexingMetrics;
     }
 
-    @Transactional(propagation = Propagation.REQUIRED,rollbackFor =  Exception.class)
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     @Override
     public void requestIndexing(Long documentId, String contentSha256, String triggeredBy) {
         IndexWorkflowCommand command = IndexWorkflowCommand.of(
@@ -74,12 +76,21 @@ class IndexingCommandService implements IndexingCommandFacade {
         );
 
         try {
-            transactionTemplate.executeWithoutResult(status -> {
-                indexWorkflowService.queue(command);
-            });
+            indexWorkflowService.queue(command);
+
             if (!isOutboxDispatchMode()) {
                 indexWorkflowService.dispatch(command);
-                indexEventPublisher.publish(documentId, contentSha256);
+                if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            indexEventPublisher.publish(documentId, contentSha256);
+                        }
+                    });
+                } else {
+                    // 兜底逻辑：如果当前因为某种原因没在事务里，直接发
+                    indexEventPublisher.publish(documentId, contentSha256);
+                }
                 return;
             }
 

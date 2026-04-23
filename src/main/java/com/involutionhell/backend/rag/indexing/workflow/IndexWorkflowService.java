@@ -4,8 +4,13 @@ import com.involutionhell.backend.rag.document.spi.DocumentIndexingSpi;
 import com.involutionhell.backend.rag.document.spi.DocumentIndexingView;
 import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRecord;
 import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRepository;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.statemachine.StateMachine;
+import org.springframework.statemachine.StateMachineEventResult;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import reactor.core.publisher.Mono;
 
 /**
  * 索引工作流统一入口。
@@ -36,46 +41,57 @@ public class IndexWorkflowService {
         this.stateMachineFactory = stateMachineFactory;
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void queue(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.QUEUE, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void dispatch(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.DISPATCH, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void startAttempt(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.START_ATTEMPT, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void enterChunking(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.ENTER_CHUNKING, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void enterSaveChunks(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.ENTER_SAVE_CHUNKS, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void enterVectorIndexing(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.ENTER_VECTOR_INDEXING, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void enterCommitIndex(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.ENTER_COMMIT_INDEX, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void succeed(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.SUCCEED, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void retry(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.RETRY, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void fail(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.FAIL, command);
     }
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void skip(IndexWorkflowCommand command) {
         transition(IndexWorkflowEvent.SKIP, command);
     }
@@ -87,6 +103,7 @@ public class IndexWorkflowService {
         jobRepository.attachMessageId(documentId, contentSha256, messageId);
     }
 
+
     private void transition(IndexWorkflowEvent event, IndexWorkflowCommand command) {
         RagIndexJobRecord currentJob = jobRepository.findByDocumentIdAndContentSha256(command.documentId(), command.contentSha256())
                 .orElse(null);
@@ -96,8 +113,14 @@ public class IndexWorkflowService {
 
         StateMachine<IndexWorkflowState, IndexWorkflowEvent> stateMachine = stateMachineFactory.create(fromState);
         try {
-            stateMachine.start();
-            boolean accepted = stateMachine.sendEvent(event);
+            stateMachine.startReactively().block();
+            // 3.x 版本的 sendEvent 需要包装成 Mono<Message>，并返回 Flux<StateMachineEventResult>
+            StateMachineEventResult<IndexWorkflowState, IndexWorkflowEvent> result = stateMachine
+                    .sendEvent(Mono.just(MessageBuilder.withPayload(event).build()))
+                    .blockLast(); // 阻塞等待状态机处理完成
+
+            boolean accepted = result != null && result.getResultType() == StateMachineEventResult.ResultType.ACCEPTED;
+
             if (!accepted) {
                 throw new IndexWorkflowTransitionException(
                         "非法索引状态跃迁: currentState=" + fromState + ", event=" + event
@@ -114,7 +137,7 @@ public class IndexWorkflowService {
                     exception
             );
         } finally {
-            stateMachine.stop();
+            stateMachine.stopReactively().block();
         }
     }
 }

@@ -11,7 +11,6 @@ import com.involutionhell.backend.rag.indexing.service.RagTextChunker;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowCommand;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowService;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowState;
-import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowTriggerType;
 import com.involutionhell.backend.rag.shared.model.RagDocumentStatus;
 import com.involutionhell.backend.rag.shared.properties.RagProperties;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
@@ -20,7 +19,6 @@ import io.milvus.v2.exception.MilvusClientException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -75,33 +73,6 @@ public class RagIndexingService {
     }
 
     /**
-     * 对指定文档执行切片与向量索引。
-     */
-    public void indexDocument(Long documentId) {
-        indexDocument(
-                documentId,
-                null,
-                IndexWorkflowCommand.of(documentId, null, IndexWorkflowTriggerType.SYSTEM, "indexing-service")
-        );
-    }
-
-    /**
-     * 对指定文档执行切片与向量索引；如果传入预期版本且与当前文档不一致，则直接丢弃旧任务。
-     */
-    public void indexDocument(Long documentId, String expectedContentSha256) {
-        indexDocument(
-                documentId,
-                expectedContentSha256,
-                IndexWorkflowCommand.of(
-                        documentId,
-                        expectedContentSha256,
-                        IndexWorkflowTriggerType.SYSTEM,
-                        "indexing-service"
-                )
-        );
-    }
-
-    /**
      * 使用指定工作流上下文执行一次索引尝试。
      */
     public void indexDocument(Long documentId, String expectedContentSha256, IndexWorkflowCommand workflowCommand) {
@@ -134,7 +105,7 @@ public class RagIndexingService {
             log.info(
                     "RAG indexing completed: documentId={}, contentSha={}, targetGeneration={}, chunkCount={}, elapsedMs={}",
                     documentId,
-                    RagLogHelper.shortSha(document.contentSha256()),
+                    RagLogHelper.shortSha(currentContentSha256),
                     targetGeneration,
                     chunkCount,
                     Duration.ofNanos(System.nanoTime() - startedAt).toMillis()
@@ -211,6 +182,24 @@ public class RagIndexingService {
         indexOutboxRepository.deleteByDocumentId(documentId);
         indexJobTransitionRepository.deleteByDocumentId(documentId);
         indexJobRepository.deleteByDocumentId(documentId);
+    }
+
+    /**
+     * 物理清理特定代际的索引状态。
+     * 由孤儿清理器调用，用于回收崩溃任务留下的残留数据。
+     */
+    public void deleteOrphanedIndexingState(Long documentId, long generation) {
+        log.info("开始物理清理孤儿代际数据: documentId={}, generation={}", documentId, generation);
+
+        // 1. 获取当前向量索引器
+        RagMilvusVectorIndexer milvusVectorIndexer = currentMilvusVectorIndexer();
+
+        // 2. 清理向量数据库 + 清理 PG 里的 Chunk 记录
+        // 这里复用你已有的 deletePendingGeneration 方法
+        // 第三个参数传 null，代表不保留任何东西，全量物理删除该代际
+        deletePendingGeneration(documentId, generation, null, milvusVectorIndexer);
+
+        log.debug("孤儿代际数据清理完成: documentId={}, generation={}", documentId, generation);
     }
 
     private int indexDocumentOnce(
@@ -371,7 +360,8 @@ public class RagIndexingService {
     private long nextIndexGeneration(DocumentIndexingView document) {
         long currentGeneration = document.indexedGeneration() == null ? 0L : document.indexedGeneration();
         long nowGeneration = System.currentTimeMillis();
-        return nowGeneration > currentGeneration ? nowGeneration : currentGeneration + 1L;
+        // 确保即使时钟回拨，新代际也一定比旧代际大
+        return Math.max(nowGeneration, currentGeneration + 1L);
     }
 
     private String toHeadingPathText(List<String> headingPath) {
@@ -427,6 +417,7 @@ public class RagIndexingService {
             return List.of();
         }
         return rawList.stream()
+                .filter(Objects::nonNull)
                 .map(String::valueOf)
                 .filter(item -> !item.isBlank())
                 .toList();
@@ -684,10 +675,6 @@ public class RagIndexingService {
 
         private NonRetryableIndexingException(String message) {
             super(message);
-        }
-
-        private NonRetryableIndexingException(String message, Throwable cause) {
-            super(message, cause);
         }
     }
 

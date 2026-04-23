@@ -12,7 +12,6 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -66,49 +65,6 @@ class DocumentCommandService implements DocumentCommandFacade {
         logCreate(record, prepared);
         queueAndPublish(record.id(), record.contentSha256());
         return documentQueryFacade.getDocument(record.id());
-    }
-
-    @Override
-    @Transactional
-    public RagDocumentView createDocument(
-            MultipartFile file,
-            String sourceType,
-            String sourceUri,
-            String externalRef,
-            String title,
-            Map<String, Object> metadata
-    ) {
-        if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("上传文件不能为空");
-        }
-
-        String originalFilename = resolveOriginalFilename(file);
-        String content;
-        try {
-            content = new String(file.getBytes(), StandardCharsets.UTF_8);
-        } catch (Exception exception) {
-            throw new IllegalStateException("读取上传文件失败", exception);
-        }
-
-        Map<String, Object> uploadMetadata = metadata == null ? new LinkedHashMap<>() : new LinkedHashMap<>(metadata);
-        if (StringUtils.hasText(originalFilename)) {
-            uploadMetadata.putIfAbsent("originalFilename", originalFilename);
-        }
-        if (StringUtils.hasText(file.getContentType())) {
-            uploadMetadata.putIfAbsent("contentType", file.getContentType());
-        }
-        uploadMetadata.putIfAbsent("uploadMode", "multipart");
-
-        logUpload(file, originalFilename, sourceType, sourceUri, title);
-
-        return createDocument(new RagDocumentCreateRequest(
-                StringUtils.hasText(sourceType) ? sourceType : "markdown",
-                StringUtils.hasText(sourceUri) ? sourceUri : defaultSourceUri(originalFilename),
-                trimToNull(externalRef),
-                StringUtils.hasText(title) ? title.trim() : defaultTitle(originalFilename),
-                content,
-                uploadMetadata
-        ));
     }
 
     @Override
@@ -226,27 +182,6 @@ class DocumentCommandService implements DocumentCommandFacade {
         return enriched;
     }
 
-    private String resolveOriginalFilename(MultipartFile file) {
-        String originalFilename = trimToNull(StringUtils.cleanPath(file.getOriginalFilename()));
-        if (!StringUtils.hasText(originalFilename)) {
-            return "uploaded-document.md";
-        }
-        int lastSlash = Math.max(originalFilename.lastIndexOf('/'), originalFilename.lastIndexOf('\\'));
-        return lastSlash >= 0 ? originalFilename.substring(lastSlash + 1) : originalFilename;
-    }
-
-    private String defaultSourceUri(String originalFilename) {
-        return "upload/" + originalFilename;
-    }
-
-    private String defaultTitle(String originalFilename) {
-        int dotIndex = originalFilename.lastIndexOf('.');
-        if (dotIndex <= 0) {
-            return originalFilename;
-        }
-        return originalFilename.substring(0, dotIndex);
-    }
-
     private String normalize(String value) {
         if (!StringUtils.hasText(value)) {
             return value;
@@ -291,17 +226,6 @@ class DocumentCommandService implements DocumentCommandFacade {
                 prepared.sourceUri(),
                 prepared.title(),
                 prepared.content().length()
-        );
-    }
-
-    private void logUpload(MultipartFile file, String originalFilename, String sourceType, String sourceUri, String title) {
-        log.info(
-                "RAG upload received: filename={}, sourceType={}, sourceUri={}, title={}, size={}",
-                originalFilename,
-                StringUtils.hasText(sourceType) ? sourceType : "markdown",
-                StringUtils.hasText(sourceUri) ? sourceUri : defaultSourceUri(originalFilename),
-                StringUtils.hasText(title) ? title.trim() : defaultTitle(originalFilename),
-                file.getSize()
         );
     }
 

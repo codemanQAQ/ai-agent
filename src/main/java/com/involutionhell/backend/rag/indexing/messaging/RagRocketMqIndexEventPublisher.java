@@ -1,10 +1,9 @@
 package com.involutionhell.backend.rag.indexing.messaging;
 
 import com.involutionhell.backend.rag.shared.properties.RagProperties;
-import com.involutionhell.backend.rag.indexing.messaging.RagIndexMessage;
 import com.involutionhell.backend.rag.shared.support.RagJsonCodec;
-import org.apache.rocketmq.client.apis.producer.SendReceipt;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
+import org.apache.rocketmq.client.apis.producer.SendReceipt;
 import org.apache.rocketmq.client.core.RocketMQClientTemplate;
 import org.apache.rocketmq.client.support.RocketMQHeaders;
 import org.slf4j.Logger;
@@ -59,7 +58,7 @@ public class RagRocketMqIndexEventPublisher implements RagIndexEventPublisher {
             SendReceipt receipt = rocketMQClientTemplate.syncSendNormalMessage(
                     topic,
                     MessageBuilder.withPayload(payload)
-                            .setHeader(RocketMQHeaders.TAGS,tag)
+                            .setHeader(RocketMQHeaders.TAGS, tag)
                             .setHeader(RocketMQHeaders.KEYS, "rag-doc-" + documentId)
                             .build()
             );

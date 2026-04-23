@@ -1,18 +1,18 @@
 package com.involutionhell.backend.rag.indexing.persistence.jdbc;
 
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRepository;
-import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRecord;
 import com.involutionhell.backend.rag.indexing.model.RagIndexJobStatus;
 import com.involutionhell.backend.rag.indexing.model.RagIndexStage;
+import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRecord;
+import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRepository;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.stereotype.Repository;
+
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
-import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Repository;
 
 /**
  * 基于 Spring JDBC 的离线索引作业仓储实现。
@@ -20,7 +20,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class JdbcRagIndexJobRepository implements RagIndexJobRepository {
 
-    private static final RowMapper<RagIndexJobRecord> ROW_MAPPER = (rs, rowNum) -> new RagIndexJobRecord(
+    private static final RowMapper<RagIndexJobRecord> ROW_MAPPER = (rs, _) -> new RagIndexJobRecord(
             rs.getLong("id"),
             rs.getLong("document_id"),
             rs.getString("content_sha256"),
@@ -44,142 +44,64 @@ public class JdbcRagIndexJobRepository implements RagIndexJobRepository {
         this.jdbc = jdbc;
     }
 
+    private static OffsetDateTime toOffsetDateTime(Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant().atOffset(ZoneOffset.UTC);
+    }
+
     @Override
     public void queue(Long documentId, String contentSha256) {
-        // 同一文档版本只保留一条作业记录；重复排队时直接把状态重置为 QUEUED。
-        int updatedRows = jdbc.update(
+        // 利用 PG 的 ON CONFLICT 语法，一条 SQL 搞定并发写入，无惧主键冲突！
+        jdbc.update(
                 """
-                UPDATE rag_index_jobs
-                   SET status = ?, stage = ?, attempt_count = 0, target_generation = NULL,
-                       message_id = NULL, last_error = NULL, started_at = NULL, finished_at = NULL,
-                       updated_at = now()
-                 WHERE document_id = ? AND content_sha256 = ?
-                """,
-                RagIndexJobStatus.QUEUED.name(),
-                RagIndexStage.QUEUED.name(),
+                        INSERT INTO rag_index_jobs (
+                            document_id, content_sha256, status, stage
+                        ) VALUES (?, ?, ?, ?)
+                        ON CONFLICT (document_id, content_sha256) -- 这里必须是你的联合唯一索引
+                        DO UPDATE SET
+                            status = EXCLUDED.status,
+                            stage = EXCLUDED.stage,
+                            attempt_count = 0,
+                            target_generation = NULL,
+                            message_id = NULL,
+                            last_error = NULL,
+                            started_at = NULL,
+                            finished_at = NULL,
+                            updated_at = now()
+                        """,
                 documentId,
-                contentSha256
+                contentSha256,
+                RagIndexJobStatus.QUEUED.name(),
+                RagIndexStage.QUEUED.name()
         );
-        if (updatedRows > 0) {
-            return;
-        }
-
-        try {
-            jdbc.update(
-                    """
-                    INSERT INTO rag_index_jobs (
-                        document_id, content_sha256, status, stage
-                    ) VALUES (?, ?, ?, ?)
-                    """,
-                    documentId,
-                    contentSha256,
-                    RagIndexJobStatus.QUEUED.name(),
-                    RagIndexStage.QUEUED.name()
-            );
-        } catch (DuplicateKeyException exception) {
-            // 并发排队时允许重试一次，把最终状态收敛到同一行。
-            queue(documentId, contentSha256);
-        }
     }
 
     @Override
     public void attachMessageId(Long documentId, String contentSha256, String messageId) {
-        // messageId 后补绑定，方便把 RocketMQ 消息和内部 job 状态串起来排查。
-        int updatedRows = jdbc.update(
+        jdbc.update(
                 """
-                UPDATE rag_index_jobs
-                   SET message_id = ?, updated_at = now()
-                 WHERE document_id = ? AND content_sha256 = ?
-                """,
-                messageId,
+                        INSERT INTO rag_index_jobs (
+                            document_id, content_sha256, status, stage, message_id
+                        ) VALUES (?, ?, 'QUEUED', 'QUEUED', ?)
+                        ON CONFLICT (document_id, content_sha256)
+                        DO UPDATE SET
+                            message_id = EXCLUDED.message_id,
+                            updated_at = now()
+                        """,
                 documentId,
-                contentSha256
+                contentSha256,
+                messageId
         );
-        if (updatedRows > 0) {
-            return;
-        }
-
-        try {
-            jdbc.update(
-                    """
-                    INSERT INTO rag_index_jobs (
-                        document_id, content_sha256, status, stage, message_id
-                    ) VALUES (?, ?, ?, ?, ?)
-                    """,
-                    documentId,
-                    contentSha256,
-                    RagIndexJobStatus.QUEUED.name(),
-                    RagIndexStage.QUEUED.name(),
-                    messageId
-            );
-        } catch (DuplicateKeyException exception) {
-            attachMessageId(documentId, contentSha256, messageId);
-        }
     }
 
     @Override
     public void annotateEvent(Long documentId, String contentSha256, String event) {
         jdbc.update(
                 """
-                UPDATE rag_index_jobs
-                   SET last_event = ?, version = version + 1, updated_at = now()
-                 WHERE document_id = ? AND content_sha256 = ?
-                """,
+                        UPDATE rag_index_jobs
+                           SET last_event = ?, version = version + 1, updated_at = now()
+                         WHERE document_id = ? AND content_sha256 = ?
+                        """,
                 event,
-                documentId,
-                contentSha256
-        );
-    }
-
-    @Override
-    public void startAttempt(Long documentId, String contentSha256, Long targetGeneration) {
-        // 真正开始一次消费时才进入 RUNNING，并记录目标 generation。
-        int updatedRows = jdbc.update(
-                """
-                UPDATE rag_index_jobs
-                   SET status = ?, stage = ?, target_generation = ?, attempt_count = attempt_count + 1,
-                       last_error = NULL, started_at = COALESCE(started_at, now()), finished_at = NULL,
-                       updated_at = now()
-                 WHERE document_id = ? AND content_sha256 = ?
-                """,
-                RagIndexJobStatus.RUNNING.name(),
-                RagIndexStage.PREPARING.name(),
-                targetGeneration,
-                documentId,
-                contentSha256
-        );
-        if (updatedRows > 0) {
-            return;
-        }
-
-        try {
-            jdbc.update(
-                    """
-                    INSERT INTO rag_index_jobs (
-                        document_id, content_sha256, status, stage, attempt_count, target_generation, started_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, now())
-                    """,
-                    documentId,
-                    contentSha256,
-                    RagIndexJobStatus.RUNNING.name(),
-                    RagIndexStage.PREPARING.name(),
-                    1,
-                    targetGeneration
-            );
-        } catch (DuplicateKeyException exception) {
-            startAttempt(documentId, contentSha256, targetGeneration);
-        }
-    }
-
-    @Override
-    public void updateStage(Long documentId, String contentSha256, RagIndexStage stage) {
-        jdbc.update(
-                """
-                UPDATE rag_index_jobs
-                   SET stage = ?, updated_at = now()
-                 WHERE document_id = ? AND content_sha256 = ?
-                """,
-                stage.name(),
                 documentId,
                 contentSha256
         );
@@ -190,10 +112,10 @@ public class JdbcRagIndexJobRepository implements RagIndexJobRepository {
         // MQ 将继续投递，所以 job 状态退回 QUEUED，但保留当前失败阶段和错误信息。
         jdbc.update(
                 """
-                UPDATE rag_index_jobs
-                   SET status = ?, stage = ?, last_error = ?, updated_at = now()
-                 WHERE document_id = ? AND content_sha256 = ?
-                """,
+                        UPDATE rag_index_jobs
+                           SET status = ?, stage = ?, last_error = ?, updated_at = now()
+                         WHERE document_id = ? AND content_sha256 = ?
+                        """,
                 RagIndexJobStatus.QUEUED.name(),
                 stage.name(),
                 errorMessage,
@@ -203,59 +125,11 @@ public class JdbcRagIndexJobRepository implements RagIndexJobRepository {
     }
 
     @Override
-    public void markSucceeded(Long documentId, String contentSha256, Long targetGeneration) {
-        jdbc.update(
-                """
-                UPDATE rag_index_jobs
-                   SET status = ?, stage = ?, target_generation = ?, last_error = NULL,
-                       finished_at = now(), updated_at = now()
-                 WHERE document_id = ? AND content_sha256 = ?
-                """,
-                RagIndexJobStatus.SUCCEEDED.name(),
-                RagIndexStage.COMPLETED.name(),
-                targetGeneration,
-                documentId,
-                contentSha256
-        );
-    }
-
-    @Override
-    public void markFailed(Long documentId, String contentSha256, RagIndexStage stage, String errorMessage) {
-        jdbc.update(
-                """
-                UPDATE rag_index_jobs
-                   SET status = ?, stage = ?, last_error = ?, finished_at = now(), updated_at = now()
-                 WHERE document_id = ? AND content_sha256 = ?
-                """,
-                RagIndexJobStatus.FAILED.name(),
-                stage.name(),
-                errorMessage,
-                documentId,
-                contentSha256
-        );
-    }
-
-    @Override
-    public void markSkipped(Long documentId, String contentSha256, String reason) {
-        // 例如旧版本消息、文档不存在等场景会被显式标记为 SKIPPED，避免误判为失败。
-        jdbc.update(
-                """
-                UPDATE rag_index_jobs
-                   SET status = ?, stage = ?, last_error = ?, finished_at = now(), updated_at = now()
-                 WHERE document_id = ? AND content_sha256 = ?
-                """,
-                RagIndexJobStatus.SKIPPED.name(),
-                RagIndexStage.SKIPPED.name(),
-                reason,
-                documentId,
-                contentSha256
-        );
-    }
-
-    @Override
     public Optional<RagIndexJobRecord> findByDocumentIdAndContentSha256(Long documentId, String contentSha256) {
         List<RagIndexJobRecord> results = jdbc.query(
-                "SELECT * FROM rag_index_jobs WHERE document_id = ? AND content_sha256 = ?",
+                """
+                            SELECT * FROM rag_index_jobs WHERE document_id = ? AND content_sha256 = ?
+                        """,
                 ROW_MAPPER,
                 documentId,
                 contentSha256
@@ -263,12 +137,122 @@ public class JdbcRagIndexJobRepository implements RagIndexJobRepository {
         return results.stream().findFirst();
     }
 
+    // ------------------------------------------------------------------------
+    // CAS (Compare-And-Swap) 防并发写入防线
+    // ------------------------------------------------------------------------
+
     @Override
     public void deleteByDocumentId(Long documentId) {
-        jdbc.update("DELETE FROM rag_index_jobs WHERE document_id = ?", documentId);
+        jdbc.update(
+                """
+                           DELETE FROM rag_index_jobs WHERE document_id = ?
+                        """, documentId);
     }
 
-    private static OffsetDateTime toOffsetDateTime(Timestamp timestamp) {
-        return timestamp == null ? null : timestamp.toInstant().atOffset(ZoneOffset.UTC);
+    @Override
+    public List<RagIndexJobRecord> findStaleJobs(OffsetDateTime updatedBefore, int limit) {
+        // 1. 转换 OffsetDateTime 为数据库识别的 Timestamp
+        Timestamp timestamp = Timestamp.from(updatedBefore.toInstant());
+
+        // 2. SQL 逻辑：
+        // 筛选状态不是终态（SUCCEEDED, FAILED, SKIPPED）的任务。
+        return jdbc.query(
+                """
+                        SELECT * FROM rag_index_jobs
+                         WHERE status NOT IN ('SUCCEEDED', 'SKIPPED')
+                           AND updated_at < ?
+                         ORDER BY updated_at
+                         LIMIT ?
+                        """,
+                ROW_MAPPER,
+                timestamp,
+                limit
+        );
+    }
+
+    @Override
+    public int updateStage(Long documentId, String contentSha256, RagIndexStage fromStage, RagIndexStage toStage) {
+        return jdbc.update(
+                """
+                        UPDATE rag_index_jobs
+                           SET stage = ?, updated_at = now()
+                         WHERE document_id = ? AND content_sha256 = ? AND stage = ?
+                        """,
+                toStage.name(),
+                documentId,
+                contentSha256,
+                fromStage.name()
+        );
+    }
+
+    @Override
+    public int startAttempt(Long documentId, String contentSha256, RagIndexStage fromStage, Long targetGeneration) {
+        return jdbc.update(
+                """
+                        UPDATE rag_index_jobs
+                           SET status = ?, stage = ?, target_generation = ?, attempt_count = attempt_count + 1,
+                               last_error = NULL, started_at = COALESCE(started_at, now()), finished_at = NULL,
+                               updated_at = now()
+                         WHERE document_id = ? AND content_sha256 = ? AND stage = ?
+                        """,
+                RagIndexJobStatus.RUNNING.name(),
+                RagIndexStage.PREPARING.name(),
+                targetGeneration,
+                documentId,
+                contentSha256,
+                fromStage.name()
+        );
+    }
+
+    @Override
+    public int markSucceeded(Long documentId, String contentSha256, RagIndexStage fromStage, Long targetGeneration) {
+        return jdbc.update(
+                """
+                        UPDATE rag_index_jobs
+                           SET status = ?, stage = ?, target_generation = ?, last_error = NULL,
+                               finished_at = now(), updated_at = now()
+                         WHERE document_id = ? AND content_sha256 = ? AND stage = ?
+                        """,
+                RagIndexJobStatus.SUCCEEDED.name(),
+                RagIndexStage.COMPLETED.name(),
+                targetGeneration,
+                documentId,
+                contentSha256,
+                fromStage.name()
+        );
+    }
+
+    @Override
+    public int markFailed(Long documentId, String contentSha256, RagIndexStage fromStage, RagIndexStage failureStage, String errorMessage) {
+        return jdbc.update(
+                """
+                        UPDATE rag_index_jobs
+                           SET status = ?, stage = ?, last_error = ?, finished_at = now(), updated_at = now()
+                         WHERE document_id = ? AND content_sha256 = ? AND stage = ?
+                        """,
+                RagIndexJobStatus.FAILED.name(),
+                failureStage.name(),
+                errorMessage,
+                documentId,
+                contentSha256,
+                fromStage.name()
+        );
+    }
+
+    @Override
+    public int markSkipped(Long documentId, String contentSha256, RagIndexStage fromStage, String reason) {
+        return jdbc.update(
+                """
+                        UPDATE rag_index_jobs
+                           SET status = ?, stage = ?, last_error = ?, finished_at = now(), updated_at = now()
+                         WHERE document_id = ? AND content_sha256 = ? AND stage = ?
+                        """,
+                RagIndexJobStatus.SKIPPED.name(),
+                RagIndexStage.SKIPPED.name(),
+                reason,
+                documentId,
+                contentSha256,
+                fromStage.name()
+        );
     }
 }

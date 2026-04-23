@@ -30,6 +30,16 @@ public class RagJsonCodec {
         }
     }
 
+    public <T> T read(byte[] bytes, Class<T> type) {
+        try {
+            // 直接传入 byte[] 比 new String(bytes) 性能更好
+            // 因为减少了将字节数组转换为字符串时的字符集编解码开销和内存分配
+            return objectMapper.readValue(bytes, type);
+        } catch (Exception exception) {
+            throw new IllegalStateException("JSON 反序列化失败", exception);
+        }
+    }
+
     public <T> T read(String json, Class<T> type) {
         try {
             return objectMapper.readValue(json, type);

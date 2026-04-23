@@ -40,18 +40,24 @@ public class IndexWorkflowAuditService {
     ) {
         RagIndexJobRecord job = jobRepository.findByDocumentIdAndContentSha256(command.documentId(), command.contentSha256())
                 .orElse(null);
-        RagIndexOutboxRecord outbox = outboxRepository.findByDocumentIdAndContentSha256(command.documentId(), command.contentSha256())
-                .orElse(null);
+
+        RagIndexOutboxRecord outbox = null;
+        if (toState == IndexWorkflowState.DISPATCHING) {
+            outbox = outboxRepository.findByDocumentIdAndContentSha256(command.documentId(), command.contentSha256())
+                    .orElse(null);
+        }
+
         transitionRepository.save(
                 command.documentId(),
                 job == null ? null : job.id(),
                 outbox == null ? null : outbox.id(),
                 command.contentSha256(),
-                fromState == null ? null : fromState.name(),
+                fromState == null ? "NEW" : fromState.name(), // 明确 NEW 状态
                 toState.name(),
                 event.name(),
                 command.triggerType().name(),
                 command.triggeredBy(),
+                // 成功标志：非失败且非重试
                 event != IndexWorkflowEvent.FAIL && event != IndexWorkflowEvent.RETRY,
                 command.failureReason(),
                 command.errorMessage(),

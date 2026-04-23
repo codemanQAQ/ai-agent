@@ -27,7 +27,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 
 /**
  * 处理 RocketMQ 中的 RAG 索引消息。
@@ -97,7 +96,7 @@ public class RagIndexMessageListener implements RocketMQListener {
             ByteBuffer body = messageView.getBody().duplicate();
             bytes = new byte[body.remaining()];
             body.get(bytes);
-            message = jsonCodec.read(new String(bytes, StandardCharsets.UTF_8), RagIndexMessage.class);
+            message = jsonCodec.read(bytes, RagIndexMessage.class);
             // 将 messageId 绑定到 job，方便后续从库表和日志一起追踪一次消费。
             log.info(
                     "RAG index message received: messageId={}, documentId={}, contentSha={}, deliveryAttempt={}",
