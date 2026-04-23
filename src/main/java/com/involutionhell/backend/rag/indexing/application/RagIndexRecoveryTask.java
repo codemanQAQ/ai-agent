@@ -9,21 +9,22 @@ import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRecord;
 import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobRepository;
 import com.involutionhell.backend.rag.indexing.persistence.RagIndexOutboxRecord;
 import com.involutionhell.backend.rag.indexing.service.RagIndexingMetrics;
-import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowEvent;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowCommand;
+import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowEvent;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowService;
 import com.involutionhell.backend.rag.indexing.workflow.IndexWorkflowTriggerType;
 import com.involutionhell.backend.rag.shared.model.RagDocumentStatus;
 import com.involutionhell.backend.rag.shared.properties.RagProperties;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
-import java.time.OffsetDateTime;
-import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
+
+import java.time.OffsetDateTime;
+import java.util.List;
 
 /**
  * 宏观补偿任务：恢复长期停留在 PENDING / PROCESSING / FAILED 的文档。
@@ -44,6 +45,7 @@ public class RagIndexRecoveryTask {
     private final RagIndexingService indexingService;
     private final RagIndexingMetrics indexingMetrics;
     private final TransactionTemplate transactionTemplate;
+    private final RagIndexMaintenanceService ragIndexMaintenanceService;
 
     public RagIndexRecoveryTask(
             RagProperties ragProperties,
@@ -53,7 +55,7 @@ public class RagIndexRecoveryTask {
             RagIndexOutboxService outboxService,
             RagIndexingService indexingService,
             RagIndexingMetrics indexingMetrics,
-            TransactionTemplate transactionTemplate
+            TransactionTemplate transactionTemplate, RagIndexMaintenanceService ragIndexMaintenanceService
     ) {
         this.ragProperties = ragProperties;
         this.documentIndexingSpi = documentIndexingSpi;
@@ -63,13 +65,19 @@ public class RagIndexRecoveryTask {
         this.indexingService = indexingService;
         this.indexingMetrics = indexingMetrics;
         this.transactionTemplate = transactionTemplate;
+        this.ragIndexMaintenanceService = ragIndexMaintenanceService;
     }
 
-    @Scheduled(fixedDelayString = "${rag.recovery.fixed-delay-millis:60000}")
+    @Scheduled(fixedDelayString = "${rag.recovery.fixed-delay-millis:6000000}")
     public void recoverStaleDocuments() {
         int resetOutboxCount = outboxService.resetStuckSendingEvents();
         if (resetOutboxCount > 0) {
             log.warn("Detected stuck RAG outbox events and reset them for retry: count={}", resetOutboxCount);
+        }
+
+        int repairedOrphans = ragIndexMaintenanceService.executeOrphanCleanup();
+        if (repairedOrphans > 0) {
+            log.warn("Detected stale orphaned RAG indexing jobs and repaired them: count={}", repairedOrphans);
         }
 
         int recovered = 0;

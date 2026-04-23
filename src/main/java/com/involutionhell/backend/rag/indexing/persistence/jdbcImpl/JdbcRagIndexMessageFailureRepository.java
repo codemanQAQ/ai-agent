@@ -1,4 +1,4 @@
-package com.involutionhell.backend.rag.indexing.persistence.jdbc;
+package com.involutionhell.backend.rag.indexing.persistence.jdbcImpl;
 
 import com.involutionhell.backend.rag.indexing.persistence.RagIndexMessageFailureRepository;
 import com.involutionhell.backend.rag.shared.support.RagJsonCodec;

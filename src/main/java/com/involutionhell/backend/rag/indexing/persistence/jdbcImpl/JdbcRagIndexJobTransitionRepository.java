@@ -1,4 +1,4 @@
-package com.involutionhell.backend.rag.indexing.persistence.jdbc;
+package com.involutionhell.backend.rag.indexing.persistence.jdbcImpl;
 
 import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobTransitionRepository;
 import com.involutionhell.backend.rag.indexing.persistence.RagIndexJobTransitionRecord;

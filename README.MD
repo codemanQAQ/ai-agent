@@ -280,3 +280,14 @@ curl -X POST http://127.0.0.1:8080/api/v1/public/rag/ask \
 
 ## 维护说明
 本项目由 **InvolutionHell** 社区维护，旨在打破内卷，共建透明的计算机学习生态。
+
+### 测试代码
+```text
+curl -X POST "http://localhost:8080/api/v1/public/rag/documents/create" \
+  -H "Accept: application/json" \
+  -F "file=@/Users/polaris/Downloads/AGENT.md" \
+  -F "sourceType=MARKDOWN" \
+  -F "sourceUri=file:///Users/polaris/Downloads/AGENT.md" \
+  -F "externalRef=rag-md-003" \
+  -F "title=agent文档"
+```

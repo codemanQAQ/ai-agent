@@ -18,7 +18,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.concurrent.Executor;
 
@@ -44,7 +43,6 @@ class IndexingCommandService implements IndexingCommandFacade {
             DocumentIndexingSpi documentIndexingSpi,
             RagProperties ragProperties,
             @Qualifier("ragVirtualThreadExecutor") Executor ragVirtualThreadExecutor,
-            TransactionTemplate transactionTemplate,
             RagIndexingMetrics indexingMetrics
     ) {
         this.indexOutboxServiceProvider = indexOutboxServiceProvider;

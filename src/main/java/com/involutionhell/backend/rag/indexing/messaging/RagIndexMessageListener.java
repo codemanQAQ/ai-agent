@@ -92,7 +92,6 @@ public class RagIndexMessageListener implements RocketMQListener {
         String messageId = messageView.getMessageId().toString();
         byte[] bytes = null;
         try {
-            // RocketMQ 消息体以 ByteBuffer 暴露，这里先复制再做 JSON 反序列化。
             ByteBuffer body = messageView.getBody().duplicate();
             bytes = new byte[body.remaining()];
             body.get(bytes);

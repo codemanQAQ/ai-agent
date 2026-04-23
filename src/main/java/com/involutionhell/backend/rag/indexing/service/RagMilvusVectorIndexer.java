@@ -34,7 +34,6 @@ import java.util.*;
  * 负责复用 embedding 缓存并直接写入 Milvus，避免 chunk 未变化时重复调用 embedding 模型。
  */
 @Component
-@ConditionalOnBean(MilvusVectorStore.class)
 @ConditionalOnProperty(prefix = "rag.milvus", name = "enabled", havingValue = "true")
 public class RagMilvusVectorIndexer {
 

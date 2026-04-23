@@ -19,7 +19,6 @@ import java.time.OffsetDateTime;
  * 启用 RocketMQ 后，将索引任务投递到消息队列。
  */
 @Service
-@ConditionalOnBean(RocketMQClientTemplate.class)
 @ConditionalOnProperty(prefix = "rag.rocketmq", name = "enabled", havingValue = "true")
 @ConditionalOnProperty(prefix = "rag.rocketmq", name = {"endpoints", "topic"})
 public class RagRocketMqIndexEventPublisher implements RagIndexEventPublisher {

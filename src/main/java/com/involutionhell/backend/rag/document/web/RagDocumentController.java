@@ -98,7 +98,6 @@ public class RagDocumentController {
         uploadMetadata.put("fileSize", file.getSize());
         ZoneId aetZone = ZoneId.of("Australia/Sydney");
         uploadMetadata.put("uploadTime", Time.valueOf(LocalTime.now(aetZone)));
-
         logUpload(file, originalFilename, sourceType, sourceUri, title);
 
         // 5. 构建纯粹的领域请求对象，丢给 Service 层

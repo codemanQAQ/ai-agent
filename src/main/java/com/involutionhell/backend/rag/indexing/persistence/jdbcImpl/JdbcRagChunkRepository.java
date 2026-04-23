@@ -1,4 +1,4 @@
-package com.involutionhell.backend.rag.indexing.persistence.jdbc;
+package com.involutionhell.backend.rag.indexing.persistence.jdbcImpl;
 
 import com.involutionhell.backend.rag.indexing.persistence.RagChunkRepository;
 import com.involutionhell.backend.rag.indexing.persistence.RagChunkRecord;
