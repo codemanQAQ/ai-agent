@@ -113,7 +113,34 @@
 
 默认接口入口：`http://127.0.0.1:8080/api/v1`
 
-### 4. 调用示例接口
+### 4. 动态调整日志级别
+服务通过 Actuator 暴露 `loggers` endpoint，可在不重启服务的情况下临时调整包或类的日志级别。
+
+查看某个包当前日志级别：
+
+```bash
+curl http://127.0.0.1:8080/api/v1/actuator/loggers/com.involutionhell.backend.rag
+```
+
+临时开启 RAG 模块 `DEBUG` 日志：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/actuator/loggers/com.involutionhell.backend.rag \
+  -H "Content-Type: application/json" \
+  -d '{"configuredLevel":"DEBUG"}'
+```
+
+排障结束后恢复为 `INFO`：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/actuator/loggers/com.involutionhell.backend.rag \
+  -H "Content-Type: application/json" \
+  -d '{"configuredLevel":"INFO"}'
+```
+
+生产环境暴露 `loggers` endpoint 前需确保 Actuator 只在受控网络或鉴权网关后访问。
+
+### 5. 调用示例接口
 文档创建：
 
 ```bash
@@ -249,7 +276,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/public/rag/ask \
 - [ ] 将 `title`、`headingPathText` 等检索字段下沉到 `rag_chunks`，减少跨表组合计算。
 - [ ] 增加物化 `search_vector` 列，并为其建立单一 GIN 索引。
 - [ ] 评估并优化 `LIKE` 兜底分支比例，避免退化为大范围扫描。
-- [ ] 引入邮件模板引擎用于任务失败通知：对离线阶段 `a / b / c / d` 等多条入库失败记录做聚合后仅发送一次消息，通知内容需包含多条失败记录明细，方案设计上注意通知组装、聚合策略与发送通道解耦。
+- [ ] 修复索引失败通知风暴问题：当大量文档同一时间处理失败时，`SMS` / `Mail` 不应按“单条 index 错误”和“最终入库失败”逐条轰炸收件人；需要引入通知聚合、限流、去重或摘要批次发送机制，并保持通知组装、聚合策略与发送通道解耦。
 
 ### P3：召回质量优化
 

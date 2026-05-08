@@ -19,10 +19,12 @@ import com.involutionhell.backend.rag.retrieval.service.RagQueryTransformationRe
 import com.involutionhell.backend.rag.retrieval.service.RagQueryTransformer;
 import com.involutionhell.backend.rag.retrieval.service.RagRetriever;
 import com.involutionhell.backend.rag.shared.metadata.RagSearchFilter;
+import com.involutionhell.backend.rag.shared.support.RagLogFields;
 import com.involutionhell.backend.rag.shared.support.RagLogHelper;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -63,20 +65,23 @@ class RagAskService implements RagAskFacade {
 
     @Override
     public RagAnswerResponse ask(RagAskRequest request) {
+        String correlationId = "ask:" + UUID.randomUUID();
         int topK = request.topK() == null ? ragProperties.defaultTopK() : request.topK();
         RagSearchFilter filter = RagSearchFilter.of(
                 request.sourceUriPrefix(),
                 request.tags(),
                 request.headingPathContains()
         );
-        log.info(
-                "RAG ask started: questionLength={}, questionPreview={}, topK={}, historyTurns={}, hasFilter={}",
-                request.question() == null ? 0 : request.question().length(),
-                RagLogHelper.previewQuestion(request.question()),
-                topK,
-                request.history() == null ? 0 : request.history().size(),
-                !filter.isEmpty()
-        );
+        log.atInfo()
+                .addKeyValue(RagLogFields.EVENT_NAME, "rag.ask.started")
+                .addKeyValue(RagLogFields.EVENT_OUTCOME, RagLogFields.OUTCOME_STARTED)
+                .addKeyValue(RagLogFields.RAG_CORRELATION_ID, correlationId)
+                .addKeyValue(RagLogFields.RAG_QUESTION_LENGTH, request.question() == null ? 0 : request.question().length())
+                .addKeyValue(RagLogFields.RAG_QUESTION_PREVIEW, RagLogHelper.previewQuestion(request.question()))
+                .addKeyValue(RagLogFields.RAG_TOP_K, topK)
+                .addKeyValue(RagLogFields.RAG_HISTORY_TURNS, request.history() == null ? 0 : request.history().size())
+                .addKeyValue(RagLogFields.RAG_HAS_FILTER, !filter.isEmpty())
+                .log("RAG ask started");
 
         RagQueryTransformationResult transformedQuery = ragQueryTransformer.transform(
                 request.question(),
@@ -89,18 +94,20 @@ class RagAskService implements RagAskFacade {
         );
 
         if (log.isDebugEnabled()) {
-            log.debug(
-                    "RAG query preprocessing completed: conversationTurns={}, queryTransformed={}, transformedByModel={}, queryCount={}, expandedByModel={}, perQueryTopK={}, retrievalQueries={}",
-                    transformedQuery.conversationTurns(),
-                    transformedQuery.queryTransformed(),
-                    transformedQuery.transformedByModel(),
-                    expandedQuery.retrievalQueries().size(),
-                    expandedQuery.expandedByModel(),
-                    perQueryTopK,
-                    expandedQuery.retrievalQueries().stream()
+            log.atDebug()
+                    .addKeyValue(RagLogFields.EVENT_NAME, "rag.ask.preprocessed")
+                    .addKeyValue(RagLogFields.EVENT_OUTCOME, RagLogFields.OUTCOME_SUCCESS)
+                    .addKeyValue(RagLogFields.RAG_CORRELATION_ID, correlationId)
+                    .addKeyValue("rag.conversation_turns", transformedQuery.conversationTurns())
+                    .addKeyValue("rag.query_transformed", transformedQuery.queryTransformed())
+                    .addKeyValue("rag.transformed_by_model", transformedQuery.transformedByModel())
+                    .addKeyValue(RagLogFields.RAG_QUERY_COUNT, expandedQuery.retrievalQueries().size())
+                    .addKeyValue(RagLogFields.RAG_EXPANDED_BY_MODEL, expandedQuery.expandedByModel())
+                    .addKeyValue("rag.per_query_top_k", perQueryTopK)
+                    .addKeyValue("rag.retrieval_queries", expandedQuery.retrievalQueries().stream()
                             .map(RagLogHelper::previewQuestion)
-                            .toList()
-            );
+                            .toList())
+                    .log("RAG query preprocessing completed");
         }
 
         List<List<RagRetrievedChunk>> retrievalResults = expandedQuery.retrievalQueries().stream()
@@ -109,14 +116,16 @@ class RagAskService implements RagAskFacade {
         List<RagRetrievedChunk> contexts = expandNeighborWindow(ragDocumentJoiner.join(retrievalResults, topK));
         RagAnswerResult answer = answerGenerator.generate(request.question(), contexts);
 
-        log.info(
-                "RAG ask completed: queryCount={}, contextCount={}, generatedByModel={}, queryExpanded={}, expandedByModel={}",
-                expandedQuery.retrievalQueries().size(),
-                contexts.size(),
-                answer.generatedByModel(),
-                expandedQuery.queryExpanded(),
-                expandedQuery.expandedByModel()
-        );
+        log.atInfo()
+                .addKeyValue(RagLogFields.EVENT_NAME, "rag.ask.completed")
+                .addKeyValue(RagLogFields.EVENT_OUTCOME, RagLogFields.OUTCOME_SUCCESS)
+                .addKeyValue(RagLogFields.RAG_CORRELATION_ID, correlationId)
+                .addKeyValue(RagLogFields.RAG_QUERY_COUNT, expandedQuery.retrievalQueries().size())
+                .addKeyValue(RagLogFields.RAG_CONTEXT_COUNT, contexts.size())
+                .addKeyValue(RagLogFields.RAG_GENERATED_BY_MODEL, answer.generatedByModel())
+                .addKeyValue(RagLogFields.RAG_QUERY_EXPANDED, expandedQuery.queryExpanded())
+                .addKeyValue(RagLogFields.RAG_EXPANDED_BY_MODEL, expandedQuery.expandedByModel())
+                .log("RAG ask completed");
 
         return new RagAnswerResponse(
                 request.question(),
