@@ -32,3 +32,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### APM agents (downloaded locally, not committed) ###
+elastic-apm-agent*.jar
+elastic-otel-javaagent*.jar

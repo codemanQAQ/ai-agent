@@ -1,5 +1,5 @@
 @org.springframework.modulith.ApplicationModule(
-        displayName = "RAG Platform",
+        displayName = "Common",
         type = org.springframework.modulith.ApplicationModule.Type.OPEN
 )
-package com.involutionhell.backend.rag;
+package com.involutionhell.backend.rag.common;

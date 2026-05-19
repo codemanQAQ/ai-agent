@@ -226,7 +226,14 @@ class DocumentCommandService implements DocumentCommandFacade {
                 .addKeyValue("rag.source_uri", prepared.sourceUri())
                 .addKeyValue("rag.title", prepared.title())
                 .addKeyValue("rag.content_length", prepared.content().length())
-                .log("RAG document created");
+                .log(
+                        "RAG document created: documentId={}, contentSha={}, sourceType={}, title={}, contentLength={}",
+                        record.id(),
+                        RagLogHelper.shortSha(prepared.contentSha256()),
+                        prepared.sourceType(),
+                        prepared.title(),
+                        prepared.content().length()
+                );
     }
 
     private void logUpdate(Long documentId, PreparedDocument prepared) {
@@ -240,7 +247,14 @@ class DocumentCommandService implements DocumentCommandFacade {
                 .addKeyValue("rag.source_uri", prepared.sourceUri())
                 .addKeyValue("rag.title", prepared.title())
                 .addKeyValue("rag.content_length", prepared.content().length())
-                .log("RAG document updated");
+                .log(
+                        "RAG document updated: documentId={}, contentSha={}, sourceType={}, title={}, contentLength={}",
+                        documentId,
+                        RagLogHelper.shortSha(prepared.contentSha256()),
+                        prepared.sourceType(),
+                        prepared.title(),
+                        prepared.content().length()
+                );
     }
 
     private void logReindex(Long documentId, String contentSha256) {
@@ -250,7 +264,11 @@ class DocumentCommandService implements DocumentCommandFacade {
                 .addKeyValue(RagLogFields.RAG_CORRELATION_ID, RagLogFields.documentCorrelationId(documentId, contentSha256))
                 .addKeyValue(RagLogFields.RAG_DOCUMENT_ID, documentId)
                 .addKeyValue(RagLogFields.RAG_CONTENT_SHA, RagLogHelper.shortSha(contentSha256))
-                .log("RAG reindex requested");
+                .log(
+                        "RAG reindex requested: documentId={}, contentSha={}",
+                        documentId,
+                        RagLogHelper.shortSha(contentSha256)
+                );
     }
 
     private record PreparedDocument(

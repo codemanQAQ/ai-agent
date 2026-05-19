@@ -1,6 +1,6 @@
-package com.involutionhell.backend.common.error;
+package com.involutionhell.backend.rag.common.error;
 
-import com.involutionhell.backend.common.api.ApiResponse;
+import com.involutionhell.backend.rag.common.api.ApiResponse;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

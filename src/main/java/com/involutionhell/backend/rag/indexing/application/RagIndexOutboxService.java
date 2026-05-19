@@ -98,7 +98,14 @@ public class RagIndexOutboxService {
                         .addKeyValue("rag.outbox_id", event.id())
                         .addKeyValue("rag.outbox_event_type", event.eventType())
                         .addKeyValue("rag.outbox_attempt_count", event.attemptCount())
-                        .log("RAG outbox event published");
+                        .log(
+                                "RAG outbox event published: documentId={}, contentSha={}, messageId={}, outboxId={}, attempt={}",
+                                event.documentId(),
+                                RagLogHelper.shortSha(event.contentSha256()),
+                                publishedMessageId,
+                                event.id(),
+                                event.attemptCount()
+                        );
                 dispatched++;
             } catch (Exception exception) {
                 indexingMetrics.recordOutboxDispatchFailure("sent_confirmation");
@@ -168,6 +175,8 @@ public class RagIndexOutboxService {
                 cutoff,
                 ragProperties.recovery().batchSize()
         );
+        int resetCount = 0;
+        List<Long> resetEventIds = new java.util.ArrayList<>();
         for (RagIndexOutboxRecord stuckEvent : stuckEvents) {
             if (deliveryAlreadyConfirmed(stuckEvent)) {
                 continue;
@@ -176,6 +185,24 @@ public class RagIndexOutboxService {
                     stuckEvent.id(),
                     "Outbox SENDING 状态超时，已重置为 FAILED 等待补偿",
                     OffsetDateTime.now()
+            );
+            resetCount++;
+            if (resetEventIds.size() < 20) {
+                resetEventIds.add(stuckEvent.id());
+            }
+        }
+        if (resetCount > 0) {
+            log.atInfo()
+                    .addKeyValue(RagLogFields.EVENT_NAME, "rag.outbox.stuck_reset")
+                    .addKeyValue(RagLogFields.EVENT_OUTCOME, RagLogFields.OUTCOME_SUCCESS)
+                    .addKeyValue("rag.reset_count", resetCount)
+                    .addKeyValue("rag.scanned_count", stuckEvents.size())
+                    .addKeyValue("rag.reset_event_ids", resetEventIds)
+                    .log("RAG outbox stuck SENDING events reset for retry");
+        } else if (!stuckEvents.isEmpty()) {
+            log.debug(
+                    "RAG outbox stuck scan: scanned={} but all already confirmed, no reset performed",
+                    stuckEvents.size()
             );
         }
         return stuckEvents.size();

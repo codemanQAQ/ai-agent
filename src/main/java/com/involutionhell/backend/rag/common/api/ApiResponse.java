@@ -1,4 +1,4 @@
-package com.involutionhell.backend.common.api;
+package com.involutionhell.backend.rag.common.api;
 
 public record ApiResponse<T>(boolean success, String message, T data) {
 

@@ -106,7 +106,13 @@ public class RagIndexMessageListener implements RocketMQListener {
                     .addKeyValue(RagLogFields.RAG_DOCUMENT_ID, message.documentId())
                     .addKeyValue(RagLogFields.RAG_CONTENT_SHA, RagLogHelper.shortSha(message.contentSha256()))
                     .addKeyValue(RagLogFields.RAG_DELIVERY_ATTEMPT, deliveryAttempt)
-                    .log("RAG MQ message received");
+                    .log(
+                            "RAG MQ message received: documentId={}, contentSha={}, messageId={}, deliveryAttempt={}",
+                            message.documentId(),
+                            RagLogHelper.shortSha(message.contentSha256()),
+                            messageId,
+                            deliveryAttempt
+                    );
             workflowService.attachMessageId(message.documentId(), message.contentSha256(), messageId);
             ragIndexingService.indexDocument(
                     message.documentId(),
@@ -141,7 +147,12 @@ public class RagIndexMessageListener implements RocketMQListener {
                     .addKeyValue(RagLogFields.RAG_MESSAGE_ID, messageId)
                     .addKeyValue(RagLogFields.RAG_DOCUMENT_ID, message.documentId())
                     .addKeyValue(RagLogFields.RAG_CONTENT_SHA, RagLogHelper.shortSha(message.contentSha256()))
-                    .log("RAG MQ message consumed");
+                    .log(
+                            "RAG MQ message consumed: documentId={}, contentSha={}, messageId={}",
+                            message.documentId(),
+                            RagLogHelper.shortSha(message.contentSha256()),
+                            messageId
+                    );
             return ConsumeResult.SUCCESS;
         } catch (IllegalArgumentException exception) {
             if (message != null) {

@@ -2,13 +2,14 @@
 <configuration>
     <include resource="org/springframework/boot/logging/logback/base.xml"/>
 
-    <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
-        <captureExperimentalAttributes>true</captureExperimentalAttributes>
-        <captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
-    </appender>
-
+    <!--
+        日志采集由 Elastic APM Java Agent 处理：
+          - trace.id / transaction.id / span.id 通过 agent 自动注入到 MDC，
+            被 application.properties 里的 logging.pattern.correlation 读取并打到控制台。
+          - 如需把日志上报到 APM Server，启动参数加 -Delastic.apm.log_sending=true 即可，
+            agent 会在不需要任何 logback appender 的情况下完成上报。
+    -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="OTEL"/>
     </root>
 </configuration>

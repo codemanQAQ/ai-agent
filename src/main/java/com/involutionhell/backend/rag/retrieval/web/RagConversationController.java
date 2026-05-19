@@ -1,6 +1,6 @@
 package com.involutionhell.backend.rag.retrieval.web;
 
-import com.involutionhell.backend.common.api.ApiResponse;
+import com.involutionhell.backend.rag.common.api.ApiResponse;
 import com.involutionhell.backend.rag.retrieval.api.RagConversationListView;
 import com.involutionhell.backend.rag.retrieval.api.RagConversationMessagesView;
 import com.involutionhell.backend.rag.retrieval.api.RagConversationSummaryView;

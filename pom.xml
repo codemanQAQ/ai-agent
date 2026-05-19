@@ -6,7 +6,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.4</version>
+        <version>4.0.6</version>
         <relativePath/>
     </parent>
 
@@ -18,7 +18,8 @@
         <java.version>25</java.version>
         <maven.compiler.release>25</maven.compiler.release>
         <org.mapstruct.version>1.6.3</org.mapstruct.version>
-        <spring-ai.version>2.0.0-M4</spring-ai.version>
+        <spring-ai.version>2.0.0-M6</spring-ai.version>
+        <grpc.version>1.79.0</grpc.version>
         <spring-statemachine.version>4.0.1</spring-statemachine.version>
         <spring-modulith.version>2.0.5</spring-modulith.version>
         <rocketmq.version>2.3.5</rocketmq.version>
@@ -100,7 +101,6 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-openai</artifactId>
-            <version>2.0.0-M4</version>
         </dependency>
 
         <!-- spring ai milvus vector store -->
@@ -255,6 +255,12 @@
                 <version>${spring-statemachine.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- CVE-2025-55163: rocketmq-v5-client 拉入 grpc-netty-shaded:1.59.1，强制抬到修复版 -->
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-netty-shaded</artifactId>
+                <version>${grpc.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

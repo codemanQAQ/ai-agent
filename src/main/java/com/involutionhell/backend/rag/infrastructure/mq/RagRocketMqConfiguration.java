@@ -15,6 +15,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 
 import java.time.Duration;
 
@@ -63,7 +64,7 @@ public class RagRocketMqConfiguration {
     @ConditionalOnMissingBean(RocketMQClientTemplate.class)
     public RocketMQClientTemplate rocketMQClientTemplate(
             RagProperties ragProperties,
-            RocketMQMessageConverter rocketMQMessageConverter
+            @Lazy RocketMQMessageConverter rocketMQMessageConverter
     ) {
         RagProperties.RocketMq rocketMq = ragProperties.rocketMq();
         log.info(

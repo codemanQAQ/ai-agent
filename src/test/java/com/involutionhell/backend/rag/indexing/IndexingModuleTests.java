@@ -26,7 +26,7 @@ import static org.awaitility.Awaitility.await;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ApplicationModuleTest(
-        module = "rag.indexing",
+        module = "indexing",
         mode = ApplicationModuleTest.BootstrapMode.ALL_DEPENDENCIES,
         extraIncludes = "rag.infrastructure",
         webEnvironment = SpringBootTest.WebEnvironment.NONE

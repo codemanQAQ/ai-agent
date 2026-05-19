@@ -1,6 +1,6 @@
 package com.involutionhell.backend.rag.indexing.web;
 
-import com.involutionhell.backend.common.api.ApiResponse;
+import com.involutionhell.backend.rag.common.api.ApiResponse;
 import com.involutionhell.backend.rag.indexing.api.IndexingQueryFacade;
 import com.involutionhell.backend.rag.indexing.api.RagIndexJobView;
 import com.involutionhell.backend.rag.indexing.api.RagIndexTimelineView;

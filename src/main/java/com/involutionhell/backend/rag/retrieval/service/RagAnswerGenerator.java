@@ -82,11 +82,11 @@ public class RagAnswerGenerator {
         stream = applyAnswerTimeout(stream);
         return stream.switchIfEmpty(Flux.defer(() -> {
                     // 空流对前端等同于无回答，必须转为可见的 fallback delta。
-                    log.warn("Streaming answer generation returned empty content, falling back to summary: contextCount={}", contexts.size());
+                    log.warn("Streaming answer generation returned empty content, falling back to summary: contextCount={}, fallbackReason=empty_response", contexts.size());
                     retrievalMetrics.recordFallback("answer_generate", "answer", "empty_response");
                     RagRequestFeedbacks.record(feedbacks, "answer_generate", "empty_response", "大模型返回空内容，已回退为检索摘要。");
                     generatedByModelCallback.accept(false);
-                    return Flux.just(fallback(question, contexts, "OpenAI 调用失败，已回退为检索摘要。").answer());
+                    return Flux.just(fallback(question, contexts, "大模型返回空内容，已回退为检索摘要。").answer());
                 }))
                 .onErrorResume(exception -> {
                     // SSE 不因模型异常直接中断，优先返回可解释的检索摘要并通过 notice 暴露降级。

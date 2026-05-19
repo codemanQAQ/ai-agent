@@ -20,7 +20,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ApplicationModuleTest(
-        module = "rag.document",
+        module = "document",
         extraIncludes = "rag.infrastructure",
         webEnvironment = SpringBootTest.WebEnvironment.NONE
 )

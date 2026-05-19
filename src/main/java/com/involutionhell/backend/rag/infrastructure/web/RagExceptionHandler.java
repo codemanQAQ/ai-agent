@@ -1,6 +1,8 @@
 package com.involutionhell.backend.rag.infrastructure.web;
 
-import com.involutionhell.backend.common.api.ApiResponse;
+import com.involutionhell.backend.rag.common.api.ApiResponse;
+import com.involutionhell.backend.rag.shared.support.RagLogHelper;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,9 +56,10 @@ public class RagExceptionHandler {
      * 处理 RAG 业务逻辑中主动抛出的校验异常
      */
     @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class})
-    public ResponseEntity<ApiResponse<Void>> handleBusinessException(Exception exception) {
-        log.warn("RAG 模块业务流程拦截: {}", exception.getMessage());
-        // 可以根据需要加入 RAG 专属的业务状态码，目前直接使用 ApiResponse.fail
+    public ResponseEntity<ApiResponse<Void>> handleBusinessException(Exception exception, HttpServletRequest request) {
+        log.warn("RAG 模块业务流程拦截: method={}, path={}, error={}",
+                request.getMethod(), request.getRequestURI(), RagLogHelper.errorSummary(exception));
+        // 业务异常的 message 由 RAG 业务代码主动构造，回写给客户端是安全的。
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.fail("RAG 业务异常: " + exception.getMessage()));
     }
@@ -65,10 +68,12 @@ public class RagExceptionHandler {
      * 兜底处理 RAG 模块其他未预期的运行时异常 (如网络中断、向量库连接失败等)
      */
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleUnexpectedException(Exception exception) {
-        log.error("RAG 模块发生未预期的系统异常", exception);
+    public ResponseEntity<ApiResponse<Void>> handleUnexpectedException(Exception exception, HttpServletRequest request) {
+        log.error("RAG 模块发生未预期的系统异常: method={}, path={}, error={}",
+                request.getMethod(), request.getRequestURI(), RagLogHelper.errorSummary(exception), exception);
+        // 兜底分支的 message 可能携带底层依赖细节，不向客户端透出原文。
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.fail("RAG 系统异常: " + exception.getMessage()));
+                .body(ApiResponse.fail("RAG 系统异常，请稍后重试或联系管理员"));
     }
 
     private String resolveValidationMessage(Exception exception) {

@@ -97,7 +97,14 @@ public class RagIndexingService {
                 .addKeyValue(RagLogFields.RAG_TRIGGER_TYPE, workflowCommand.triggerType())
                 .addKeyValue(RagLogFields.RAG_TRIGGERED_BY, workflowCommand.triggeredBy())
                 .addKeyValue(RagLogFields.RAG_MESSAGE_ID, workflowCommand.messageId())
-                .log("RAG indexing attempt started");
+                .log(
+                        "RAG indexing attempt started: documentId={}, contentSha={}, generation={}, triggerType={}, messageId={}",
+                        documentId,
+                        RagLogHelper.shortSha(document.contentSha256()),
+                        targetGeneration,
+                        workflowCommand.triggerType(),
+                        workflowCommand.messageId()
+                );
 
         try {
             validateIndexableDocument(document, expectedContentSha256, false);
@@ -119,7 +126,14 @@ public class RagIndexingService {
                     .addKeyValue(RagLogFields.RAG_CHUNK_COUNT, chunkCount)
                     .addKeyValue(RagLogFields.RAG_ELAPSED_MS, Duration.ofNanos(System.nanoTime() - startedAt).toMillis())
                     .addKeyValue(RagLogFields.RAG_MESSAGE_ID, workflowCommand.messageId())
-                    .log("RAG indexing attempt completed");
+                    .log(
+                            "RAG indexing attempt completed: documentId={}, contentSha={}, generation={}, chunkCount={}, elapsedMs={}",
+                            documentId,
+                            RagLogHelper.shortSha(currentContentSha256),
+                            targetGeneration,
+                            chunkCount,
+                            Duration.ofNanos(System.nanoTime() - startedAt).toMillis()
+                    );
         } catch (SkippedIndexingException exception) {
             if (exception.requiresCleanup()) {
                 cleanupFailedGenerationSafely(documentId, targetGeneration, document.indexedGeneration(), vectorWriteApplied.get());
@@ -704,6 +718,11 @@ public class RagIndexingService {
         log.debug("Milvus vectors deleted by expression for documentId={}", documentId);
         // 3. 最后无脑清理本地 Chunk 记录（无论前两步发生什么，都不影响这里）
         chunkRepository.deleteByDocumentId(documentId);
+        log.atInfo()
+                .addKeyValue(RagLogFields.EVENT_NAME, "rag.index.deleted")
+                .addKeyValue(RagLogFields.EVENT_OUTCOME, RagLogFields.OUTCOME_SUCCESS)
+                .addKeyValue(RagLogFields.RAG_DOCUMENT_ID, documentId)
+                .log("RAG document index cleanup completed");
     }
 
     private void validateIndexableDocument(

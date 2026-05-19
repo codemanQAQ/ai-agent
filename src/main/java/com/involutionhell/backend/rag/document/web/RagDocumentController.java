@@ -1,6 +1,6 @@
 package com.involutionhell.backend.rag.document.web;
 
-import com.involutionhell.backend.common.api.ApiResponse;
+import com.involutionhell.backend.rag.common.api.ApiResponse;
 import com.involutionhell.backend.rag.document.api.*;
 import com.involutionhell.backend.rag.shared.markdown.MarkdownDocumentParser;
 import jakarta.validation.Valid;
@@ -71,8 +71,10 @@ public class RagDocumentController {
         String originalFilename = resolveOriginalFilename(file);
 
         // 🛡️ 防火墙 2：严格校验 Markdown 文件类型，防恶意文件上传
-        if (!isMarkdownFile(originalFilename, file.getContentType())) {
-            log.warn("非法文件上传尝试: filename={}, contentType={}", originalFilename, file.getContentType());
+        String markdownRejectReason = classifyMarkdownRejection(originalFilename, file.getContentType());
+        if (markdownRejectReason != null) {
+            log.warn("非法文件上传尝试: filename={}, contentType={}, rejectReason={}",
+                    originalFilename, file.getContentType(), markdownRejectReason);
             throw new IllegalArgumentException("安全拦截：只允许上传 Markdown 文件 (.md 或 .markdown)");
         }
 
@@ -159,24 +161,25 @@ public class RagDocumentController {
     }
 
     /**
-     * 严格验证是否为 Markdown 文件
+     * 严格验证是否为 Markdown 文件，返回拒绝原因（null 表示通过）。
+     * 用作日志可观测字段，便于 on-call 区分误传 vs 恶意上传。
      */
-    private boolean isMarkdownFile(String filename, String contentType) {
-        if (!StringUtils.hasText(filename)) return false;
+    private String classifyMarkdownRejection(String filename, String contentType) {
+        if (!StringUtils.hasText(filename)) {
+            return "MISSING_FILENAME";
+        }
         String lowerFilename = filename.toLowerCase();
-
-        // 1. 强校验后缀
         boolean hasValidExtension = lowerFilename.endsWith(".md") || lowerFilename.endsWith(".markdown") || lowerFilename.endsWith(".mdx");
         if (!hasValidExtension) {
-            return false;
+            return "INVALID_EXTENSION";
         }
-
-        // 2. 如果前端传了 contentType，拒绝明确的危险类型 (如 text/html, application/x-sh)
         if (StringUtils.hasText(contentType)) {
             String lowerContentType = contentType.toLowerCase();
-            return !lowerContentType.contains("html") && !lowerContentType.contains("javascript") && !lowerContentType.contains("shell");
+            if (lowerContentType.contains("html") || lowerContentType.contains("javascript") || lowerContentType.contains("shell")) {
+                return "DANGEROUS_CONTENT_TYPE";
+            }
         }
-        return true;
+        return null;
     }
 
     private InferredUploadMetadata inferUploadMetadata(String content, String originalFilename) {

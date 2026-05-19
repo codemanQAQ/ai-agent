@@ -1,6 +1,6 @@
 package com.involutionhell.backend.rag.infrastructure.nativeimage;
 
-import com.involutionhell.backend.common.api.ApiResponse;
+import com.involutionhell.backend.rag.common.api.ApiResponse;
 import com.involutionhell.backend.rag.document.api.RagDocumentCreateRequest;
 import com.involutionhell.backend.rag.document.api.RagDocumentUpdateRequest;
 import com.involutionhell.backend.rag.document.api.RagDocumentView;

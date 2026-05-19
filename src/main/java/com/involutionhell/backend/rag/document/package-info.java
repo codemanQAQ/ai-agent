@@ -1,5 +1,5 @@
 @org.springframework.modulith.ApplicationModule(
         displayName = "RAG Document",
-        allowedDependencies = {"common", "rag.shared"}
+        allowedDependencies = {"common", "shared"}
 )
 package com.involutionhell.backend.rag.document;

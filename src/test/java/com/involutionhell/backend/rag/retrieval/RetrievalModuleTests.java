@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @ApplicationModuleTest(
-        module = "rag.retrieval",
+        module = "retrieval",
         mode = ApplicationModuleTest.BootstrapMode.ALL_DEPENDENCIES,
         extraIncludes = "rag.infrastructure",
         webEnvironment = SpringBootTest.WebEnvironment.NONE

@@ -216,7 +216,7 @@ public class RagMilvusVectorIndexer {
             }
         } catch (Exception e) {
             // 捕获特定异常并决定是否抛出
-            log.error("Milvus 表达式删除异常, documentId={}, error={}", documentId, e.getMessage(), e);
+            log.error("Milvus 表达式删除异常, documentId={}, error={}", documentId, RagLogHelper.errorSummary(e), e);
             throw e;
         }
     }

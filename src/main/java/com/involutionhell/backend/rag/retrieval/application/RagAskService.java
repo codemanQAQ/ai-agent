@@ -141,6 +141,15 @@ class RagAskService implements RagAskFacade {
                                     ))
                     )
                     .onErrorResume(exception -> {
+                        log.atError()
+                                .addKeyValue(RagLogFields.EVENT_NAME, "rag.ask.failed")
+                                .addKeyValue(RagLogFields.EVENT_OUTCOME, RagLogFields.OUTCOME_FAILURE)
+                                .addKeyValue(RagLogFields.RAG_CORRELATION_ID, correlationId)
+                                .addKeyValue("rag.conversation_id", conversationState.conversation().conversationId())
+                                .addKeyValue("rag.run_id", runId)
+                                .addKeyValue(RagLogFields.RAG_ERROR_SUMMARY, RagLogHelper.errorSummary(exception))
+                                .setCause(exception)
+                                .log("RAG ask stream failed");
                         RagAskStreamEvent errorEvent = toErrorEvent(sequence, correlationId, feedbacks, exception);
                         if (askFinalized.compareAndSet(false, true)) {
                             failAskSafely(conversationState, exception, feedbacks);

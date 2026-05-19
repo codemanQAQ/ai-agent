@@ -9,11 +9,11 @@
         displayName = "RAG Infrastructure",
         allowedDependencies = {
                 "common",
-                "rag.shared",
-                "rag.document::api",
-                "rag.indexing::messaging",
-                "rag.indexing::api",
-                "rag.retrieval::api"
+                "shared",
+                "document::api",
+                "indexing::messaging",
+                "indexing::api",
+                "retrieval::api"
         },
         type = org.springframework.modulith.ApplicationModule.Type.OPEN
 )

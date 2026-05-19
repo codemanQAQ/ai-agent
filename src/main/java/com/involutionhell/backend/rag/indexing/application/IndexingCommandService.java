@@ -76,7 +76,13 @@ class IndexingCommandService implements IndexingCommandFacade {
                 .addKeyValue(RagLogFields.RAG_TRIGGERED_BY, triggeredBy)
                 .addKeyValue("rag.rocket_mq_enabled", ragProperties.rocketMq().enabled())
                 .addKeyValue("rag.outbox_enabled", ragProperties.outbox().enabled())
-                .log("RAG index dispatch started");
+                .log(
+                        "RAG index dispatch started: documentId={}, contentSha={}, triggeredBy={}, outboxEnabled={}",
+                        documentId,
+                        RagLogHelper.shortSha(contentSha256),
+                        triggeredBy,
+                        ragProperties.outbox().enabled()
+                );
 
         try {
             indexWorkflowService.queue(command);
