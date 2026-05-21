@@ -1,6 +1,36 @@
 src/main/resources/application-dev.properties
 
 .env
+
+# Compiled class file
+*.class
+
+# Log file
+*.log
+
+# BlueJ files
+*.ctxt
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files #
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+# Jar 默认忽略，但保留 OTel agent jar
+*.jar
+!elastic-otel-javaagent.jar
+!**/src/main/**/*.jar
+!**/src/test/**/*.jar
+
+# virtual machine crash logs
+hs_err_pid*
+replay_pid*
+
 target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
