@@ -1,5 +1,3 @@
-src/main/resources/application-dev.properties
-
 .env
 
 # Compiled class file
