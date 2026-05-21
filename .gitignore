@@ -1,5 +1,6 @@
 src/main/resources/application-dev.properties
 
+.env
 target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
@@ -29,10 +30,3 @@ target/
 build/
 !**/src/main/**/build/
 !**/src/test/**/build/
-
-### VS Code ###
-.vscode/
-
-### APM agents (downloaded locally, not committed) ###
-elastic-apm-agent*.jar
-elastic-otel-javaagent*.jar

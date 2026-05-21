@@ -10,8 +10,8 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.involutionhell.backend</groupId>
-    <artifactId>backend</artifactId>
+    <groupId>com.bytedance.ai</groupId>
+    <artifactId>ai-agent</artifactId>
     <version>0.0.1-SNAPSHOT</version>
 
     <properties>
