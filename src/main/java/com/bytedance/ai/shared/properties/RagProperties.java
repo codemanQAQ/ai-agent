@@ -65,7 +65,10 @@ public record RagProperties(
         Outbox outbox,
 
         @DefaultValue
-        Recovery recovery
+        Recovery recovery,
+
+        @DefaultValue
+        Catalog catalog
 ) {
     public static RagProperties defaults() {
         return new RagProperties(
@@ -80,8 +83,58 @@ public record RagProperties(
                 QueryExpansion.defaults(),
                 Retrieval.defaults(),
                 Outbox.defaults(),
-                Recovery.defaults()
+                Recovery.defaults(),
+                Catalog.defaults()
         );
+    }
+
+    /**
+     * Catalog 模块配置。
+     *
+     * @param enabled                            是否启用 catalog 属性抽取（false 时 worker 不消费事件）
+     * @param attributeExtractionTimeoutMillis   单次属性抽取超时，单位毫秒
+     * @param attributeExtractionTemperature     属性抽取使用的模型 temperature
+     * @param attributeExtractionSystemPrompt    属性抽取 system prompt
+     * @param extractionConcurrency              属性抽取异步线程池核心并发
+     * @param extractionQueueCapacity            属性抽取异步线程池队列长度
+     */
+    public record Catalog(
+            @DefaultValue("true")
+            boolean enabled,
+
+            @DefaultValue("8000")
+            @Min(0)
+            @Max(120_000)
+            long attributeExtractionTimeoutMillis,
+
+            @DefaultValue("0.2")
+            double attributeExtractionTemperature,
+
+            @DefaultValue("""
+                    你是电商商品理解助手。读完商品描述后，仅输出一个 JSON 对象，键名固定为：
+                    {"tags": [], "usage_scenes": [], "target_audience": [], "ingredients": [], "features": []}
+                    - tags：核心标签词
+                    - usage_scenes：适用场景
+                    - target_audience：目标人群
+                    - ingredients：成分 / 材质（若不涉及可为空数组）
+                    - features：差异化卖点
+                    严禁输出多余的解释、Markdown 代码块或前后缀，只输出 JSON。
+                    """)
+            String attributeExtractionSystemPrompt,
+
+            @DefaultValue("4")
+            @Min(1)
+            @Max(64)
+            int extractionConcurrency,
+
+            @DefaultValue("128")
+            @Min(1)
+            @Max(10_000)
+            int extractionQueueCapacity
+    ) {
+        public static Catalog defaults() {
+            return new Catalog(true, 8_000L, 0.2d, "", 4, 128);
+        }
     }
 
     /**
