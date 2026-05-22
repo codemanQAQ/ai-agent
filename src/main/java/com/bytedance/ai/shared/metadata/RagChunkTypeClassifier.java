@@ -74,7 +74,7 @@ public class RagChunkTypeClassifier {
 
     private RagChunkType classifyCatalogSpu(int chunkIndex, List<String> headingPath) {
         if (headingPath == null || headingPath.isEmpty()) {
-            // chunkIndex=0 且没有 heading 通常对应渲染模板里的 H1 标题段。
+            // 没有 heading 通常意味着 markdown 主体直接是单段（SpuMarkdownRenderer 渲染异常时才走这里）。
             return chunkIndex == 0 ? RagChunkType.TITLE : RagChunkType.BODY;
         }
         for (String segment : headingPath) {
@@ -92,7 +92,12 @@ public class RagChunkTypeClassifier {
                 return RagChunkType.REVIEW;
             }
         }
-        // 有 heading 但都不命中：可能是促销标语等，归 BODY 保险。
+        // 仅在 H1 根标题下（headingPath.size()==1）且未命中任何关键词，
+        // 视为 SpuMarkdownRenderer 模板里"标题 + 品牌 + 类目 + 价格"那一段，归 TITLE。
+        if (headingPath.size() == 1) {
+            return RagChunkType.TITLE;
+        }
+        // 进入 H2 / 更深层级但都不命中：保守归 BODY。
         return RagChunkType.BODY;
     }
 

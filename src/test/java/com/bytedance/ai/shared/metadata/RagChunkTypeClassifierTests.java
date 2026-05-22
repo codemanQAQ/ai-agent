@@ -20,6 +20,16 @@ class RagChunkTypeClassifierTests {
     }
 
     @Test
+    void catalogSpuChunkUnderH1RootHeadingIsTitle() {
+        // MarkdownDocumentParser 会把 H1 标题压栈，紧随其后的品牌 / 类目 / 价格段 headingPath=[title]
+        assertThat(classifier.classify("catalog-spu", 0, List.of("轻量通勤双肩包"), null))
+                .isEqualTo(RagChunkType.TITLE);
+        assertThat(classifier.classify("catalog-spu", 1, List.of("商品标题"), null))
+                .as("即便不是 chunkIndex=0，只要 heading 仍在 H1 层级也应该是 TITLE")
+                .isEqualTo(RagChunkType.TITLE);
+    }
+
+    @Test
     void catalogSpuChunkUnderShangPinMiaoShuHeadingIsDesc() {
         assertThat(classifier.classify("catalog-spu", 3, List.of("商品描述"), null))
                 .isEqualTo(RagChunkType.DESC);
@@ -40,8 +50,9 @@ class RagChunkTypeClassifierTests {
     }
 
     @Test
-    void catalogSpuChunkUnderUnknownHeadingFallsBackToBody() {
-        assertThat(classifier.classify("catalog-spu", 2, List.of("促销标语"), null))
+    void catalogSpuChunkUnderUnknownH2HeadingFallsBackToBody() {
+        // H1 + H2 都存在但 H2 不命中任何关键词，归 BODY 保守
+        assertThat(classifier.classify("catalog-spu", 2, List.of("商品标题", "促销标语"), null))
                 .isEqualTo(RagChunkType.BODY);
     }
 
