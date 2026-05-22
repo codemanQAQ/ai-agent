@@ -44,10 +44,16 @@ public class RagConfiguration {
 
     private final RagProperties ragProperties;
     private final ObjectProvider<ChatModel> chatModelProvider;
+    private final ObjectProvider<EmbeddingModel> embeddingModelProvider;
 
-    public RagConfiguration(RagProperties ragProperties, ObjectProvider<ChatModel> chatModelProvider) {
+    public RagConfiguration(
+            RagProperties ragProperties,
+            ObjectProvider<ChatModel> chatModelProvider,
+            ObjectProvider<EmbeddingModel> embeddingModelProvider
+    ) {
         this.ragProperties = ragProperties;
         this.chatModelProvider = chatModelProvider;
+        this.embeddingModelProvider = embeddingModelProvider;
     }
 
     @PostConstruct
@@ -62,9 +68,37 @@ public class RagConfiguration {
                 ragProperties.outbox().enabled(),
                 ragProperties.recovery().enabled()
         );
+        logEffectiveEmbeddingBinding();
         warnWhenQueryExpansionChatModelMissing();
         warnWhenCompressionChatModelMissing();
         warnWhenRewriteChatModelMissing();
+    }
+
+    /**
+     * 启动时打印生效的 embedding 绑定信息，覆盖 Doubao-embedding-vision / OpenAI / 自建网关
+     * 任意一种 OpenAI-compatible endpoint，便于运维一眼确认接入的是哪一家。
+     *
+     * <p>同时校验 Milvus collection 期望维度与 RAG 配置维度一致性：不一致时按 WARN 提示，
+     * 避免索引写入后 retrieval 阶段才发现维度错配。
+     */
+    void logEffectiveEmbeddingBinding() {
+        EmbeddingModel embeddingModel = null;
+        try {
+            embeddingModel = embeddingModelProvider.getIfAvailable();
+        } catch (Exception exception) {
+            log.warn("解析 EmbeddingModel Bean 失败，离线索引链路将无法写入向量：{}", exception.getMessage());
+        }
+        int configuredDimension = ragProperties.milvus().embeddingDimension();
+        log.info(
+                "RAG embedding 绑定：modelName={}, beanType={}, milvusEmbeddingDimension={}, embeddingModelHint={}",
+                ragProperties.embeddingModel(),
+                embeddingModel == null ? "<none>" : embeddingModel.getClass().getSimpleName(),
+                configuredDimension,
+                "切换 Doubao-embedding-vision 请同步覆盖 SPRING_AI_OPENAI_BASE_URL / EMBEDDING_MODEL / EMBEDDING_DIMENSIONS 与 RAG_MILVUS_EMBEDDING_DIMENSION"
+        );
+        if (ragProperties.milvus().enabled() && embeddingModel == null) {
+            log.warn("rag.milvus.enabled=true 但没有 EmbeddingModel Bean，向量索引写入会立刻失败");
+        }
     }
 
     void warnWhenQueryExpansionChatModelMissing() {
