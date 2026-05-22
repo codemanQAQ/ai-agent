@@ -276,7 +276,7 @@ class RagIndexMaintenanceServiceTests {
         private final List<DeletedGeneration> deletedGenerations = new ArrayList<>();
 
         private RecordingIndexingService() {
-            super(null, null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         @Override

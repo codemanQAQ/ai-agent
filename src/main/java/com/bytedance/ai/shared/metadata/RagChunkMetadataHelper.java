@@ -28,6 +28,7 @@ public class RagChunkMetadataHelper {
         Map<String, Object> raw = parseRaw(metadataJson);
         return new RagChunkMetadataView(
                 asText(raw.get("blockType")),
+                RagChunkType.parseOrBody(asText(raw.get("chunkType"))),
                 asText(raw.get("codeLanguage")),
                 toStringList(raw.get("headingPath")),
                 toStringList(raw.get("documentTags")),

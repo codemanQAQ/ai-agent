@@ -46,6 +46,7 @@ public class RagIndexingService {
     private final RagProperties ragProperties;
     private final RagIndexingFailureClassifier failureClassifier;
     private final RagIndexingMetrics indexingMetrics;
+    private final com.bytedance.ai.shared.metadata.RagChunkTypeClassifier chunkTypeClassifier;
 
     public RagIndexingService(
             DocumentIndexingSpi documentIndexingSpi,
@@ -58,7 +59,8 @@ public class RagIndexingService {
             IndexWorkflowService workflowService,
             RagProperties ragProperties,
             RagIndexingFailureClassifier failureClassifier,
-            RagIndexingMetrics indexingMetrics
+            RagIndexingMetrics indexingMetrics,
+            com.bytedance.ai.shared.metadata.RagChunkTypeClassifier chunkTypeClassifier
     ) {
         this.documentIndexingSpi = documentIndexingSpi;
         this.chunkRepository = chunkRepository;
@@ -71,6 +73,7 @@ public class RagIndexingService {
         this.ragProperties = ragProperties;
         this.failureClassifier = failureClassifier;
         this.indexingMetrics = indexingMetrics;
+        this.chunkTypeClassifier = chunkTypeClassifier;
     }
 
     /**
@@ -382,6 +385,15 @@ public class RagIndexingService {
         if (chunk.blockMetadata() != null && !chunk.blockMetadata().isEmpty()) {
             metadata.putAll(chunk.blockMetadata());
         }
+        // chunkType 在 blockMetadata 之后写入，保证启发式分类不会被块级遗留字段覆盖；
+        // 显式声明优先的语义由 classifier 自己维护。
+        com.bytedance.ai.shared.metadata.RagChunkType chunkType = chunkTypeClassifier.classify(
+                document.sourceType(),
+                chunk.chunkIndex(),
+                chunk.headingPath(),
+                chunk.blockMetadata()
+        );
+        metadata.put("chunkType", chunkType.name());
         return new RagChunkDraft(
                 indexGeneration,
                 chunk.chunkIndex(),
