@@ -300,4 +300,56 @@ ALTER TABLE rag_ask_runs
 ALTER TABLE rag_ask_runs
     DROP CONSTRAINT IF EXISTS fk_rag_ask_runs_assistant_message;
 
+-- ============== Catalog 模块 ==============
+-- 电商商品主数据：SPU 业务字段独立于 rag_documents；导入时通过 document 模块对外暴露的
+-- DocumentCommandFacade.createDocument(...) 双写一行 rag_documents（source_type='catalog-spu'），
+-- 由 catalog_spu.document_id 1:1 回填，触发既有 indexing 链路。indexing 模块无需感知 catalog。
+-- 项目约定数据库层不使用外键约束，所有关联在应用层维护（参考其它表的 DROP CONSTRAINT 语句）。
+CREATE TABLE IF NOT EXISTS catalog_spu (
+                                           id                       BIGSERIAL PRIMARY KEY,
+                                           external_ref             VARCHAR(64)  NOT NULL UNIQUE,
+                                           title                    VARCHAR(255) NOT NULL,
+                                           brand                    VARCHAR(64),
+                                           category_path            VARCHAR(255),
+                                           price_min                NUMERIC(10, 2),
+                                           price_max                NUMERIC(10, 2),
+                                           stock                    INTEGER      NOT NULL DEFAULT 0,
+                                           description_md           TEXT,
+                                           images                   JSONB        NOT NULL DEFAULT '[]'::jsonb,
+                                           video_url                VARCHAR(512),
+                                           attributes_json          JSONB        NOT NULL DEFAULT '{}'::jsonb,
+                                           attributes_status        VARCHAR(16)  NOT NULL DEFAULT 'PENDING',
+                                           attributes_attempt_count INTEGER      NOT NULL DEFAULT 0,
+                                           attributes_last_error    TEXT,
+                                           attributes_attempted_at  TIMESTAMPTZ(6),
+                                           status                   VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE',
+                                           version                  BIGINT       NOT NULL DEFAULT 0,
+                                           document_id              BIGINT,
+                                           created_at               TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
+                                           updated_at               TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
+                                           CONSTRAINT catalog_spu_status_chk
+                                               CHECK (status IN ('ACTIVE', 'DRAFT', 'REMOVED')),
+                                           CONSTRAINT catalog_spu_attr_status_chk
+                                               CHECK (attributes_status IN ('PENDING', 'RUNNING', 'DONE', 'FAILED', 'SKIPPED'))
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_spu_attr_status ON catalog_spu (attributes_status);
+CREATE INDEX IF NOT EXISTS idx_catalog_spu_category    ON catalog_spu (category_path);
+CREATE INDEX IF NOT EXISTS idx_catalog_spu_brand       ON catalog_spu (brand);
+CREATE INDEX IF NOT EXISTS idx_catalog_spu_document_id ON catalog_spu (document_id);
+
+CREATE TABLE IF NOT EXISTS catalog_sku (
+                                           id          BIGSERIAL PRIMARY KEY,
+                                           spu_id      BIGINT        NOT NULL,
+                                           sku_code    VARCHAR(64)   NOT NULL,
+                                           spec_json   JSONB         NOT NULL DEFAULT '{}'::jsonb,
+                                           price       NUMERIC(10, 2) NOT NULL,
+                                           stock       INTEGER       NOT NULL DEFAULT 0,
+                                           status      VARCHAR(16)   NOT NULL DEFAULT 'ACTIVE',
+                                           created_at  TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
+                                           updated_at  TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
+                                           CONSTRAINT catalog_sku_status_chk CHECK (status IN ('ACTIVE', 'REMOVED')),
+                                           CONSTRAINT uq_catalog_sku_code UNIQUE (spu_id, sku_code)
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_sku_spu_id ON catalog_sku (spu_id);
+
 COMMIT;
