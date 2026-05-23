@@ -1,6 +1,7 @@
 package com.bytedance.ai.agent.application;
 
 import com.bytedance.ai.agent.api.AgentStreamEvent;
+import com.bytedance.ai.agent.api.CompareMatrixView;
 import com.bytedance.ai.agent.api.IntentType;
 import com.bytedance.ai.agent.api.Slot;
 import com.bytedance.ai.agent.api.SpuCardView;
@@ -47,6 +48,16 @@ public class AgentSseEventFactory {
             Map<String, Object> facetsApplied
     ) {
         return event("tool.result", correlationId, new ToolResultPayload(toolName, cards, facetsApplied));
+    }
+
+    public AgentStreamEvent toolResult(
+            String correlationId,
+            String toolName,
+            List<SpuCardView> cards,
+            Map<String, Object> facetsApplied,
+            CompareMatrixView compareMatrix
+    ) {
+        return event("tool.result", correlationId, new ToolResultPayload(toolName, cards, facetsApplied, compareMatrix));
     }
 
     public AgentStreamEvent answerDelta(String correlationId, String text) {

@@ -1,6 +1,7 @@
 package com.bytedance.ai.agent.answer;
 
 import com.bytedance.ai.agent.api.SpuCardView;
+import com.bytedance.ai.agent.api.CompareMatrixView;
 import com.bytedance.ai.agent.memory.ConversationMemory;
 import com.bytedance.ai.retrieval.spi.AgentTurnConversationState.ConversationTurn;
 import com.bytedance.ai.shared.support.RagLogHelper;
@@ -53,6 +54,16 @@ public class AgentAnswerGenerator {
             ConversationMemory memory,
             Consumer<Boolean> generatedByModelCallback
     ) {
+        return generateStream(message, cards, null, memory, generatedByModelCallback);
+    }
+
+    public Flux<String> generateStream(
+            String message,
+            List<SpuCardView> cards,
+            CompareMatrixView compareMatrix,
+            ConversationMemory memory,
+            Consumer<Boolean> generatedByModelCallback
+    ) {
         if (cards == null || cards.isEmpty()) {
             generatedByModelCallback.accept(false);
             return Flux.just("目前没有完全匹配的商品。你可以补充预算、品牌、使用场景或必须具备的功能，我再帮你缩小范围。");
@@ -60,30 +71,30 @@ public class AgentAnswerGenerator {
         ChatModel chatModel = chatModelProvider.getIfAvailable();
         if (chatModel == null) {
             generatedByModelCallback.accept(false);
-            return Flux.just(fallbackAnswer(message, cards));
+            return Flux.just(fallbackAnswer(message, cards, compareMatrix));
         }
         try {
             Flux<String> stream = ChatClient.create(chatModel)
                     .prompt()
                     .system(promptTemplate())
-                    .user(buildUserPrompt(message, cards, memory))
+                    .user(buildUserPrompt(message, cards, compareMatrix, memory))
                     .stream()
                     .content()
                     .doOnSubscribe(ignored -> generatedByModelCallback.accept(true))
                     .filter(StringUtils::hasText);
             return stream.switchIfEmpty(Flux.defer(() -> {
                         generatedByModelCallback.accept(false);
-                        return Flux.just(fallbackAnswer(message, cards));
+                        return Flux.just(fallbackAnswer(message, cards, compareMatrix));
                     }))
                     .onErrorResume(exception -> {
                         log.warn("agent answer generation failed, falling back: error={}", RagLogHelper.errorSummary(exception));
                         generatedByModelCallback.accept(false);
-                        return Flux.just(fallbackAnswer(message, cards));
+                        return Flux.just(fallbackAnswer(message, cards, compareMatrix));
                     });
         } catch (RuntimeException exception) {
             log.warn("agent answer generation setup failed, falling back: error={}", RagLogHelper.errorSummary(exception));
             generatedByModelCallback.accept(false);
-            return Flux.just(fallbackAnswer(message, cards));
+            return Flux.just(fallbackAnswer(message, cards, compareMatrix));
         }
     }
 
@@ -96,7 +107,7 @@ public class AgentAnswerGenerator {
         }
     }
 
-    private String buildUserPrompt(String message, List<SpuCardView> cards, ConversationMemory memory) {
+    private String buildUserPrompt(String message, List<SpuCardView> cards, CompareMatrixView compareMatrix, ConversationMemory memory) {
         StringBuilder builder = new StringBuilder();
         if (memory != null && memory.summary().isPresent()) {
             builder.append("【会话摘要】\n").append(memory.summary().get().trim()).append("\n\n");
@@ -129,11 +140,35 @@ public class AgentAnswerGenerator {
                     .append(card.reasons().isEmpty() ? "" : card.reasons().getFirst())
                     .append("\n");
         }
+        if (compareMatrix != null) {
+            builder.append("\n【对比矩阵】\n");
+            appendMarkdownTable(builder, compareMatrix);
+            if (StringUtils.hasText(compareMatrix.recommendationReason())) {
+                builder.append("推荐理由：").append(withCitationRefs(compareMatrix.recommendationReason())).append("\n");
+            }
+        }
         builder.append("\n【用户消息】\n").append(message);
         return builder.toString();
     }
 
     private String fallbackAnswer(String message, List<SpuCardView> cards) {
+        return fallbackAnswer(message, cards, null);
+    }
+
+    private String fallbackAnswer(String message, List<SpuCardView> cards, CompareMatrixView compareMatrix) {
+        if (compareMatrix != null && compareMatrix.rows().size() > 0) {
+            StringBuilder builder = new StringBuilder();
+            builder.append("根据“").append(message).append("”，对比如下：\n\n");
+            appendMarkdownTable(builder, compareMatrix);
+            if (StringUtils.hasText(compareMatrix.recommendedRefId())) {
+                builder.append("\n推荐：").append(citationRef(compareMatrix.recommendedRefId()));
+                if (StringUtils.hasText(compareMatrix.recommendationReason())) {
+                    builder.append("，").append(withCitationRefs(compareMatrix.recommendationReason()));
+                }
+                builder.append("。");
+            }
+            return builder.toString();
+        }
         StringBuilder builder = new StringBuilder();
         builder.append("根据“").append(message).append("”，我先推荐：");
         for (int i = 0; i < Math.min(cards.size(), 3); i++) {
@@ -148,6 +183,25 @@ public class AgentAnswerGenerator {
         }
         builder.append("。价格和库存以商品卡片为准。");
         return builder.toString();
+    }
+
+    private void appendMarkdownTable(StringBuilder builder, CompareMatrixView compareMatrix) {
+        builder.append("| 属性 |");
+        for (CompareMatrixView.ProductColumn product : compareMatrix.products()) {
+            builder.append(' ').append(citationRef(product.refId())).append(' ').append(nullToEmpty(product.title())).append(" |");
+        }
+        builder.append("\n|---|");
+        for (int i = 0; i < compareMatrix.products().size(); i++) {
+            builder.append("---|");
+        }
+        builder.append('\n');
+        for (CompareMatrixView.AttributeRow row : compareMatrix.rows()) {
+            builder.append("| ").append(nullToEmpty(row.attribute())).append(" |");
+            for (String value : row.values()) {
+                builder.append(' ').append(nullToEmpty(value)).append(" |");
+            }
+            builder.append('\n');
+        }
     }
 
     private String priceText(SpuCardView card) {
@@ -165,5 +219,20 @@ public class AgentAnswerGenerator {
 
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private String withCitationRefs(String text) {
+        if (!StringUtils.hasText(text)) {
+            return text;
+        }
+        return text.replaceAll("(?<!\\[)(#\\d+)(?!\\])", "[$1]");
+    }
+
+    private String citationRef(String refId) {
+        if (!StringUtils.hasText(refId)) {
+            return "";
+        }
+        String trimmed = refId.trim();
+        return trimmed.startsWith("[") ? trimmed : "[" + trimmed + "]";
     }
 }

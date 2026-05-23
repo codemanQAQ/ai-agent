@@ -64,6 +64,14 @@ public class AgentTurnPersistenceService {
         return repository.findRecentByConversationId(conversationId, limit);
     }
 
+    @Transactional(readOnly = true)
+    public Optional<AgentTurnRecord> findLatestMemorySummary(String conversationId) {
+        if (!StringUtils.hasText(conversationId)) {
+            return Optional.empty();
+        }
+        return repository.findLatestMemorySummary(conversationId);
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public void attachConversationMessages(String turnId, String userMessageId, String assistantMessageId) {
         requireText(turnId, "turnId 不能为空");
@@ -95,8 +103,33 @@ public class AgentTurnPersistenceService {
             Integer tokensOut,
             Integer latencyMs
     ) {
+        markSucceeded(turnId, answerText, generatedByModel, tokensIn, tokensOut, latencyMs, null, null, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void markSucceeded(
+            String turnId,
+            String answerText,
+            Boolean generatedByModel,
+            Integer tokensIn,
+            Integer tokensOut,
+            Integer latencyMs,
+            String memorySummary,
+            Integer memorySummaryMessageCount,
+            String memorySummaryModel
+    ) {
         requireText(turnId, "turnId 不能为空");
-        repository.markSucceeded(turnId, answerText, generatedByModel, tokensIn, tokensOut, latencyMs);
+        repository.markSucceeded(
+                turnId,
+                answerText,
+                generatedByModel,
+                tokensIn,
+                tokensOut,
+                latencyMs,
+                emptyToNull(memorySummary),
+                memorySummaryMessageCount,
+                emptyToNull(memorySummaryModel)
+        );
     }
 
     @Transactional(rollbackFor = Exception.class)

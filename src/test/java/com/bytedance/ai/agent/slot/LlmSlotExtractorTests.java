@@ -2,6 +2,7 @@ package com.bytedance.ai.agent.slot;
 
 import com.bytedance.ai.agent.api.IntentType;
 import com.bytedance.ai.agent.api.Slot;
+import com.bytedance.ai.agent.memory.ConversationMemory;
 import com.bytedance.ai.shared.support.RagJsonCodec;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
@@ -11,6 +12,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -63,6 +65,34 @@ class LlmSlotExtractorTests {
         assertThat(slot.brands()).containsExactly("Acme");
         assertThat(slot.mustNot()).isEmpty();
         assertThat(slot.scenario()).isNull();
+    }
+
+    @Test
+    void refineMergesBaselineSlotsAndTightensPriceRange() {
+        Slot baseline = new Slot(
+                List.of("轻便"),
+                List.of(),
+                new Slot.PriceRange(new BigDecimal("100"), new BigDecimal("500")),
+                "箱包",
+                List.of("Acme"),
+                "通勤"
+        );
+        ConversationMemory memory = new ConversationMemory(
+                List.of(),
+                Optional.empty(),
+                null,
+                null,
+                List.of("SPU-9"),
+                Optional.empty(),
+                Optional.of(baseline)
+        );
+
+        Slot slot = extractor.extract("再便宜到 300 元以下", IntentType.REFINE, memory);
+
+        assertThat(slot.must()).containsExactly("轻便");
+        assertThat(slot.categoryHint()).isEqualTo("箱包");
+        assertThat(slot.brands()).containsExactly("Acme");
+        assertThat(slot.priceRange()).isEqualTo(new Slot.PriceRange(new BigDecimal("100"), new BigDecimal("300")));
     }
 
     private static ObjectProvider<ChatModel> noChatModel() {

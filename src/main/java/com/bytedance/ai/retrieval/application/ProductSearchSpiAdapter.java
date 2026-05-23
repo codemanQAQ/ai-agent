@@ -76,6 +76,7 @@ class ProductSearchSpiAdapter implements ProductSearchSpi {
 
         List<String> includeChunkTypes = request.includeChunkTypes();
         List<ProductSearchHit> hits = aggregateChunksToSpu(chunks, includeChunkTypes);
+        hits = applyRestrictToSpuRefs(hits, request.restrictToSpuRefs());
         if (hits.size() > topK) {
             hits = hits.subList(0, topK);
         }
@@ -113,6 +114,16 @@ class ProductSearchSpiAdapter implements ProductSearchSpi {
             ));
         }
         return hits;
+    }
+
+    private List<ProductSearchHit> applyRestrictToSpuRefs(List<ProductSearchHit> hits, List<String> restrictToSpuRefs) {
+        if (restrictToSpuRefs == null || restrictToSpuRefs.isEmpty()) {
+            return hits;
+        }
+        java.util.Set<String> allowed = new java.util.HashSet<>(restrictToSpuRefs);
+        return hits.stream()
+                .filter(hit -> hit.externalRef() != null && allowed.contains(hit.externalRef()))
+                .toList();
     }
 
     private boolean matchesIncludedChunkType(RagRetrievedChunk chunk, List<String> includeChunkTypes) {

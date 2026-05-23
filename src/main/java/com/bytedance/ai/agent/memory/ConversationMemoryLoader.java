@@ -58,11 +58,30 @@ public class ConversationMemoryLoader {
             Optional<String> summary
     ) {
         List<ConversationTurn> trimmedHistory = trimRecent(history);
+        Optional<AgentTurnRecord> summaryRecord = agentTurnPersistenceService.findLatestMemorySummary(conversationId);
+        Optional<String> effectiveSummary = summaryRecord
+                .map(AgentTurnRecord::memorySummary)
+                .filter(StringUtils::hasText)
+                .or(() -> summary == null ? Optional.empty() : summary);
+        Integer summaryMessageCount = summaryRecord.map(AgentTurnRecord::memorySummaryMessageCount).orElse(null);
+        String summaryModel = summaryRecord.map(AgentTurnRecord::memorySummaryModel).orElse(null);
         Optional<AgentTurnRecord> lastTurn = findLastSucceededTurn(conversationId);
         List<String> lastSpuRefs = lastTurn.map(this::extractSpuRefs).orElse(List.of());
         Optional<IntentType> lastIntent = lastTurn.flatMap(this::parseIntent);
         Optional<Slot> lastSlots = lastTurn.flatMap(this::parseSlots);
-        return new ConversationMemory(trimmedHistory, summary, lastSpuRefs, lastIntent, lastSlots);
+        return new ConversationMemory(
+                trimmedHistory,
+                effectiveSummary,
+                summaryMessageCount,
+                summaryModel,
+                lastSpuRefs,
+                lastIntent,
+                lastSlots
+        );
+    }
+
+    public ConversationMemory load(String conversationId, List<ConversationTurn> history) {
+        return load(conversationId, history, Optional.empty());
     }
 
     private List<ConversationTurn> trimRecent(List<ConversationTurn> history) {

@@ -38,6 +38,9 @@ public class JdbcAgentTurnRepository implements AgentTurnRepository {
             rs.getString("cards_emitted"),
             (Boolean) rs.getObject("generated_by_model"),
             rs.getString("answer_text"),
+            rs.getString("memory_summary"),
+            (Integer) rs.getObject("memory_summary_message_count"),
+            rs.getString("memory_summary_model"),
             (Integer) rs.getObject("tokens_in"),
             (Integer) rs.getObject("tokens_out"),
             (Integer) rs.getObject("latency_ms"),
@@ -120,6 +123,24 @@ public class JdbcAgentTurnRepository implements AgentTurnRepository {
     }
 
     @Override
+    public Optional<AgentTurnRecord> findLatestMemorySummary(String conversationId) {
+        return jdbc.query(
+                """
+                SELECT *
+                  FROM agent_turn
+                 WHERE conversation_id = ?
+                   AND status = 'SUCCEEDED'
+                   AND memory_summary IS NOT NULL
+                   AND memory_summary <> ''
+                 ORDER BY completed_at DESC NULLS LAST, started_at DESC, id DESC
+                 LIMIT 1
+                """,
+                ROW_MAPPER,
+                conversationId
+        ).stream().findFirst();
+    }
+
+    @Override
     public void attachConversationMessages(String turnId, String userMessageId, String assistantMessageId) {
         jdbc.update(
                 """
@@ -169,13 +190,19 @@ public class JdbcAgentTurnRepository implements AgentTurnRepository {
             Boolean generatedByModel,
             Integer tokensIn,
             Integer tokensOut,
-            Integer latencyMs
+            Integer latencyMs,
+            String memorySummary,
+            Integer memorySummaryMessageCount,
+            String memorySummaryModel
     ) {
         jdbc.update(
                 """
                 UPDATE agent_turn
                    SET answer_text = ?,
                        generated_by_model = ?,
+                       memory_summary = ?,
+                       memory_summary_message_count = ?,
+                       memory_summary_model = ?,
                        tokens_in = ?,
                        tokens_out = ?,
                        latency_ms = ?,
@@ -188,6 +215,9 @@ public class JdbcAgentTurnRepository implements AgentTurnRepository {
                 """,
                 answerText,
                 generatedByModel,
+                memorySummary,
+                memorySummaryMessageCount,
+                memorySummaryModel,
                 tokensIn,
                 tokensOut,
                 latencyMs,

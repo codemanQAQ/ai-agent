@@ -79,7 +79,17 @@ class AgentTurnPersistenceServiceTests {
                 List.of(Map.of("toolName", "search_products")),
                 List.of(Map.of("spuId", 99L, "title", "轻便电脑包"))
         );
-        persistenceService.markSucceeded("turn-2", "推荐 [#1]", true, 12, 24, 321);
+        persistenceService.markSucceeded(
+                "turn-2",
+                "推荐 [#1]",
+                true,
+                12,
+                24,
+                321,
+                "用户偏好轻便电脑包",
+                6,
+                "agent-memory-summary-v1"
+        );
 
         AgentTurnRecord record = persistenceService.findByTurnId("turn-2").orElseThrow();
         assertThat(record.userMessageId()).isEqualTo("101");
@@ -96,6 +106,12 @@ class AgentTurnPersistenceServiceTests {
         assertThat(record.tokensIn()).isEqualTo(12);
         assertThat(record.tokensOut()).isEqualTo(24);
         assertThat(record.latencyMs()).isEqualTo(321);
+        assertThat(record.memorySummary()).isEqualTo("用户偏好轻便电脑包");
+        assertThat(record.memorySummaryMessageCount()).isEqualTo(6);
+        assertThat(record.memorySummaryModel()).isEqualTo("agent-memory-summary-v1");
+        assertThat(persistenceService.findLatestMemorySummary("c1"))
+                .map(AgentTurnRecord::turnId)
+                .contains("turn-2");
         assertThat(record.completedAt()).isNotNull();
     }
 

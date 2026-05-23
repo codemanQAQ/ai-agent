@@ -21,6 +21,25 @@ final class IntentRules {
             Pattern.CASE_INSENSITIVE
     );
 
+    static final Pattern COMPARE = Pattern.compile(
+            ".*(\\bvs\\b|对比|比较|哪个好|哪个更|哪款|性价比).*",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    /**
+     * REFINE 命中词：用户在已有候选基础上"微调"。
+     * 仅当 {@code ConversationMemory.lastTurnSpuRefs()} 非空时才升级为 REFINE，
+     * 否则退化为 RECOMMEND / FILTER_BY_ATTR。
+     */
+    static final Pattern REFINE = Pattern.compile(
+            ".*(再便宜|再贵|便宜一些|贵一些|便宜些|贵些|价格再低|价格再高|" +
+                    "换一个|换个|换成|不要这个|不要这些|" +
+                    "只要|只看|筛选|缩小|筛|改成|改为|" +
+                    "再看看|还有别的|还有其他|其他款|别的款|" +
+                    "刚才那些|刚刚那些|上面那些|这些里面|这几个里面|这里面).*",
+            Pattern.CASE_INSENSITIVE
+    );
+
     private IntentRules() {
     }
 }

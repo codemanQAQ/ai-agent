@@ -1,7 +1,11 @@
 package com.bytedance.ai.agent.intent;
 
 import com.bytedance.ai.agent.api.IntentType;
+import com.bytedance.ai.agent.memory.ConversationMemory;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -32,6 +36,13 @@ class RuleBasedIntentClassifierTests {
     }
 
     @Test
+    void detectsCompareByRuleL1() {
+        assertIntent("A vs B 哪个保湿", IntentType.COMPARE, 0.9d, "rule_l1");
+        assertIntent("A B C 性价比", IntentType.COMPARE, 0.9d, "rule_l1");
+        assertIntent("比较一下这两款", IntentType.COMPARE, 0.9d, "rule_l1");
+    }
+
+    @Test
     void fallsBackToVagueRecommendation() {
         assertIntent("通勤双肩包", IntentType.RECOMMEND_VAGUE, 0.5d, "fallback");
         assertIntent("", IntentType.RECOMMEND_VAGUE, 0.5d, "fallback");
@@ -41,6 +52,28 @@ class RuleBasedIntentClassifierTests {
     @Test
     void outOfScopeWinsBeforeOtherRules() {
         assertIntent("帮我写代码找 300 元以下商品", IntentType.OUT_OF_SCOPE, 0.95d, "rule_l1");
+        assertIntent("帮我写代码比较 A vs B", IntentType.OUT_OF_SCOPE, 0.95d, "rule_l1");
+    }
+
+    @Test
+    void detectsRefineOnlyWhenPreviousCardsExist() {
+        ConversationMemory memory = new ConversationMemory(
+                List.of(),
+                Optional.empty(),
+                null,
+                null,
+                List.of("SPU-9"),
+                Optional.empty(),
+                Optional.empty()
+        );
+
+        IntentClassification refine = classifier.classify("这些里面再便宜一点", memory);
+        IntentClassification noMemory = classifier.classify("这些里面再便宜一点", ConversationMemory.empty());
+
+        assertThat(refine.intent()).isEqualTo(IntentType.REFINE);
+        assertThat(refine.confidence()).isEqualTo(0.9d);
+        assertThat(refine.source()).isEqualTo("rule_l1");
+        assertThat(noMemory.intent()).isNotEqualTo(IntentType.REFINE);
     }
 
     private void assertIntent(String message, IntentType intent, double confidence, String source) {

@@ -88,7 +88,8 @@ public class SearchProductsToolCallback implements AgentToolCallback {
                 buildQuery(input),
                 RagSearchFilter.of("catalog://spu/", null, input.slots() == null ? null : input.slots().categoryHint()),
                 effectiveTopK(input.topK()),
-                input.includeChunkTypes() == null ? List.of() : input.includeChunkTypes()
+                input.includeChunkTypes() == null ? List.of() : input.includeChunkTypes(),
+                input.restrictToSpuRefs() == null ? List.of() : input.restrictToSpuRefs()
         );
     }
 
@@ -204,8 +205,12 @@ public class SearchProductsToolCallback implements AgentToolCallback {
             String query,
             Slot slots,
             Integer topK,
-            List<String> includeChunkTypes
+            List<String> includeChunkTypes,
+            List<String> restrictToSpuRefs
     ) {
+        public SearchProductsInput(String query, Slot slots, Integer topK, List<String> includeChunkTypes) {
+            this(query, slots, topK, includeChunkTypes, List.of());
+        }
     }
 
     public record SearchProductsOutput(

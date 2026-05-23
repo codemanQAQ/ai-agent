@@ -23,6 +23,13 @@ public class RuleBasedIntentClassifier implements IntentClassifier {
         if (IntentRules.OUT_OF_SCOPE.matcher(normalized).matches()) {
             return new IntentClassification(IntentType.OUT_OF_SCOPE, 0.95d, "rule_l1");
         }
+        if (IntentRules.COMPARE.matcher(normalized).matches()) {
+            return new IntentClassification(IntentType.COMPARE, 0.9d, "rule_l1");
+        }
+        boolean hasPriorCandidates = memory != null && !memory.lastTurnSpuRefs().isEmpty();
+        if (hasPriorCandidates && IntentRules.REFINE.matcher(normalized).matches()) {
+            return new IntentClassification(IntentType.REFINE, 0.9d, "rule_l1");
+        }
         if (IntentRules.PRICE.matcher(normalized).matches()) {
             return new IntentClassification(IntentType.FILTER_BY_ATTR, 0.9d, "rule_l1");
         }

@@ -66,11 +66,13 @@ class SearchProductsToolCallbackTests {
                 "推荐 300 元以下的双肩包",
                 slot,
                 5,
-                List.of("TITLE")
+                List.of("TITLE"),
+                List.of("SPU-9", "SPU-7")
         )));
 
         assertThat(productSearchSpi.lastRequest.query()).contains("推荐 300 元以下的双肩包", "轻便");
         assertThat(productSearchSpi.lastRequest.topK()).isEqualTo(5);
+        assertThat(productSearchSpi.lastRequest.restrictToSpuRefs()).containsExactly("SPU-9", "SPU-7");
         assertThat(productSearchSpi.lastRequest.filter().sourceUriPrefix()).isEqualTo("catalog://spu/");
         assertThat(productSearchSpi.lastRequest.filter().headingPathContains()).isEqualTo("箱包");
         Map<String, Object> result = jsonCodec.readMap(output);

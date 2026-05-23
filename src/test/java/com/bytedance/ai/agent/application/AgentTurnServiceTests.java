@@ -4,14 +4,17 @@ import com.bytedance.ai.agent.answer.AgentAnswerGenerator;
 import com.bytedance.ai.agent.answer.CitationExtractor;
 import com.bytedance.ai.agent.api.AgentStreamEvent;
 import com.bytedance.ai.agent.api.AgentTurnRequest;
+import com.bytedance.ai.agent.api.events.ToolResultPayload;
 import com.bytedance.ai.agent.api.IntentType;
 import com.bytedance.ai.agent.api.Slot;
 import com.bytedance.ai.agent.memory.ConversationMemoryLoader;
+import com.bytedance.ai.agent.memory.ConversationSummarizer;
 import com.bytedance.ai.agent.persistence.AgentTurnPersistenceService;
 import com.bytedance.ai.agent.persistence.AgentTurnRecord;
 import com.bytedance.ai.agent.persistence.AgentTurnRepository;
 import com.bytedance.ai.agent.slot.SlotExtractor;
 import com.bytedance.ai.agent.tool.ToolRegistry;
+import com.bytedance.ai.agent.tool.impl.CompareProductsToolCallback;
 import com.bytedance.ai.agent.tool.impl.SearchProductsToolCallback;
 import com.bytedance.ai.catalog.api.CatalogQueryFacade;
 import com.bytedance.ai.catalog.api.CatalogSkuView;
@@ -99,6 +102,45 @@ class AgentTurnServiceTests {
         assertThat(record.status()).isEqualTo("SUCCEEDED");
     }
 
+    @Test
+    void compareTurnEmitsMatrixAndPersistsToolState() {
+        InMemoryAgentTurnRepository repository = new InMemoryAgentTurnRepository();
+        AgentTurnService service = service(repository, "A面霜 vs B面霜 哪个保湿");
+
+        List<AgentStreamEvent> events = service.turnStream(new AgentTurnRequest(
+                "u1",
+                "c1",
+                "A面霜 vs B面霜 哪个保湿",
+                "turn-compare",
+                null,
+                null,
+                null
+        )).collectList().block();
+
+        assertThat(events).isNotNull();
+        AgentStreamEvent toolResult = events.stream()
+                .filter(event -> "tool.result".equals(event.event()))
+                .findFirst()
+                .orElseThrow();
+        ToolResultPayload payload = (ToolResultPayload) toolResult.data();
+        assertThat(payload.toolName()).isEqualTo("compare_products");
+        assertThat(payload.compareMatrix()).isNotNull();
+        assertThat(payload.compareMatrix().rows()).extracting("attribute").contains("保湿");
+        assertThat(events).extracting(AgentStreamEvent::event).containsSubsequence(
+                "turn.started",
+                "intent.detected",
+                "tool.calling",
+                "tool.result",
+                "answer.delta",
+                "citation",
+                "turn.completed"
+        );
+        AgentTurnRecord record = repository.findByTurnId("turn-compare").orElseThrow();
+        assertThat(record.intent()).isEqualTo("COMPARE");
+        assertThat(record.toolsCalled()).contains("compare_products");
+        assertThat(record.cardsEmitted()).contains("A 面霜", "B 面霜");
+    }
+
     private AgentTurnService service(InMemoryAgentTurnRepository repository, String message) {
         AgentTurnPersistenceService persistenceService = new AgentTurnPersistenceService(repository, jsonCodec);
         ConversationTurnAdapter conversationTurnAdapter = new ConversationTurnAdapter(new StubConversationSpi());
@@ -110,14 +152,21 @@ class AgentTurnServiceTests {
                 new StubCatalogQueryFacade(),
                 jsonCodec
         );
+        CompareProductsToolCallback compareProductsTool = new CompareProductsToolCallback(
+                new StubProductSearchSpi(),
+                new StubCatalogQueryFacade(),
+                jsonCodec,
+                Schedulers.immediate()
+        );
         ConversationMemoryLoader memoryLoader = new ConversationMemoryLoader(persistenceService, jsonCodec);
         return new AgentTurnService(
                 persistenceService,
                 conversationTurnAdapter,
                 memoryLoader,
+                new ConversationSummarizer(noChatModel()),
                 new com.bytedance.ai.agent.intent.RuleBasedIntentClassifier(),
                 slotExtractor,
-                new ToolRegistry(List.of(searchProductsTool)),
+                new ToolRegistry(List.of(searchProductsTool, compareProductsTool)),
                 new AgentAnswerGenerator(noChatModel(), new ClassPathResource("prompts/agent-answer-v1.txt")),
                 new CitationExtractor(),
                 new AgentSseEventFactory(),
@@ -168,6 +217,12 @@ class AgentTurnServiceTests {
     private static class StubProductSearchSpi implements ProductSearchSpi {
         @Override
         public List<ProductSearchHit> search(ProductSearchRequest request) {
+            if ("A面霜".equals(request.query())) {
+                return List.of(new ProductSearchHit(10L, 100L, "SPU-A", 0.92d, "TITLE", "保湿强", Map.of()));
+            }
+            if ("B面霜".equals(request.query())) {
+                return List.of(new ProductSearchHit(11L, 101L, "SPU-B", 0.81d, "TITLE", "清爽保湿", Map.of()));
+            }
             return List.of(new ProductSearchHit(9L, 99L, "SPU-9", 0.9d, "TITLE", "匹配轻便", Map.of()));
         }
     }
@@ -175,12 +230,24 @@ class AgentTurnServiceTests {
     private static class StubCatalogQueryFacade implements CatalogQueryFacade {
         @Override
         public CatalogSpuView getSpu(Long spuId) {
-            return spu();
+            if (spuId == 10L) {
+                return spu(10L, "SPU-A", "A 面霜", "保湿强", Map.of("保湿", "强"));
+            }
+            if (spuId == 11L) {
+                return spu(11L, "SPU-B", "B 面霜", "清爽保湿", Map.of("保湿", "中"));
+            }
+            return spu(9L, "SPU-9", "轻便双肩包", null, Map.of());
         }
 
         @Override
         public Optional<CatalogSpuView> findSpuByExternalRef(String externalRef) {
-            return Optional.of(spu());
+            if ("SPU-A".equals(externalRef)) {
+                return Optional.of(spu(10L, "SPU-A", "A 面霜", "保湿强", Map.of("保湿", "强")));
+            }
+            if ("SPU-B".equals(externalRef)) {
+                return Optional.of(spu(11L, "SPU-B", "B 面霜", "清爽保湿", Map.of("保湿", "中")));
+            }
+            return Optional.of(spu(9L, "SPU-9", "轻便双肩包", null, Map.of()));
         }
 
         @Override
@@ -188,23 +255,23 @@ class AgentTurnServiceTests {
             return List.of();
         }
 
-        private CatalogSpuView spu() {
+        private CatalogSpuView spu(Long id, String externalRef, String title, String description, Map<String, Object> attributes) {
             return new CatalogSpuView(
-                    9L,
-                    "SPU-9",
-                    "轻便双肩包",
+                    id,
+                    externalRef,
+                    title,
                     "Acme",
                     "箱包",
                     new BigDecimal("199"),
                     new BigDecimal("199"),
                     8,
-                    null,
+                    description,
                     List.of(),
                     null,
-                    Map.of(),
+                    attributes,
                     "DONE",
                     "ACTIVE",
-                    99L,
+                    99L + id,
                     List.of(),
                     OffsetDateTime.now(),
                     OffsetDateTime.now()
@@ -266,11 +333,20 @@ class AgentTurnServiceTests {
         }
 
         @Override
+        public Optional<AgentTurnRecord> findLatestMemorySummary(String conversationId) {
+            return records.values().stream()
+                    .filter(record -> record.conversationId().equals(conversationId))
+                    .filter(record -> record.memorySummary() != null && !record.memorySummary().isBlank())
+                    .findFirst();
+        }
+
+        @Override
         public void attachConversationMessages(String turnId, String userMessageId, String assistantMessageId) {
             AgentTurnRecord r = records.get(turnId);
             records.put(turnId, copy(r, userMessageId, assistantMessageId, r.status(), r.intent(), r.intentSource(),
                     r.intentConfidence(), r.slotsJson(), r.toolsCalled(), r.cardsEmitted(), r.generatedByModel(),
-                    r.answerText(), r.latencyMs(), r.errorCode(), r.errorMessage(), r.completedAt()));
+                    r.answerText(), r.memorySummary(), r.memorySummaryMessageCount(), r.memorySummaryModel(),
+                    r.latencyMs(), r.errorCode(), r.errorMessage(), r.completedAt()));
         }
 
         @Override
@@ -278,6 +354,7 @@ class AgentTurnServiceTests {
             AgentTurnRecord r = records.get(turnId);
             records.put(turnId, copy(r, r.userMessageId(), r.assistantMessageId(), r.status(), intent, source,
                     confidence, slotsJson, r.toolsCalled(), r.cardsEmitted(), r.generatedByModel(), r.answerText(),
+                    r.memorySummary(), r.memorySummaryMessageCount(), r.memorySummaryModel(),
                     r.latencyMs(), r.errorCode(), r.errorMessage(), r.completedAt()));
         }
 
@@ -286,15 +363,27 @@ class AgentTurnServiceTests {
             AgentTurnRecord r = records.get(turnId);
             records.put(turnId, copy(r, r.userMessageId(), r.assistantMessageId(), r.status(), r.intent(),
                     r.intentSource(), r.intentConfidence(), r.slotsJson(), toolsCalledJson, cardsEmittedJson,
-                    r.generatedByModel(), r.answerText(), r.latencyMs(), r.errorCode(), r.errorMessage(), r.completedAt()));
+                    r.generatedByModel(), r.answerText(), r.memorySummary(), r.memorySummaryMessageCount(),
+                    r.memorySummaryModel(), r.latencyMs(), r.errorCode(), r.errorMessage(), r.completedAt()));
         }
 
         @Override
-        public void markSucceeded(String turnId, String answerText, Boolean generatedByModel, Integer tokensIn, Integer tokensOut, Integer latencyMs) {
+        public void markSucceeded(
+                String turnId,
+                String answerText,
+                Boolean generatedByModel,
+                Integer tokensIn,
+                Integer tokensOut,
+                Integer latencyMs,
+                String memorySummary,
+                Integer memorySummaryMessageCount,
+                String memorySummaryModel
+        ) {
             AgentTurnRecord r = records.get(turnId);
             records.put(turnId, copy(r, r.userMessageId(), r.assistantMessageId(), "SUCCEEDED", r.intent(),
                     r.intentSource(), r.intentConfidence(), r.slotsJson(), r.toolsCalled(), r.cardsEmitted(),
-                    generatedByModel, answerText, latencyMs, null, null, OffsetDateTime.now()));
+                    generatedByModel, answerText, memorySummary, memorySummaryMessageCount, memorySummaryModel,
+                    latencyMs, null, null, OffsetDateTime.now()));
         }
 
         @Override
@@ -302,7 +391,8 @@ class AgentTurnServiceTests {
             AgentTurnRecord r = records.get(turnId);
             records.put(turnId, copy(r, r.userMessageId(), r.assistantMessageId(), "FAILED", r.intent(),
                     r.intentSource(), r.intentConfidence(), r.slotsJson(), r.toolsCalled(), r.cardsEmitted(),
-                    r.generatedByModel(), r.answerText(), latencyMs, errorCode, errorMessage, OffsetDateTime.now()));
+                    r.generatedByModel(), r.answerText(), r.memorySummary(), r.memorySummaryMessageCount(),
+                    r.memorySummaryModel(), latencyMs, errorCode, errorMessage, OffsetDateTime.now()));
         }
 
         private AgentTurnRecord copy(
@@ -318,6 +408,9 @@ class AgentTurnServiceTests {
                 String cardsEmitted,
                 Boolean generatedByModel,
                 String answerText,
+                String memorySummary,
+                Integer memorySummaryMessageCount,
+                String memorySummaryModel,
                 Integer latencyMs,
                 String errorCode,
                 String errorMessage,
@@ -327,6 +420,7 @@ class AgentTurnServiceTests {
                     r.id(), r.turnId(), r.correlationId(), r.userId(), r.conversationId(), r.requestId(),
                     userMessageId, assistantMessageId, status, r.userMessage(), intent, intentSource,
                     intentConfidence, slotsJson, toolsCalled, cardsEmitted, generatedByModel, answerText,
+                    memorySummary, memorySummaryMessageCount, memorySummaryModel,
                     r.tokensIn(), r.tokensOut(), latencyMs, errorCode, errorMessage, r.startedAt(), completedAt
             );
         }

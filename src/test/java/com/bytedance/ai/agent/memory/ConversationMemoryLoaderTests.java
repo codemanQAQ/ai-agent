@@ -45,6 +45,20 @@ class ConversationMemoryLoaderTests {
     }
 
     @Test
+    void prefersPersistedLatestMemorySummary() {
+        StubRepo repo = new StubRepo();
+        repo.appendSucceededWithSummary("turn-old", "c1", "旧摘要", 2);
+        repo.appendSucceededWithSummary("turn-new", "c1", "用户偏好拍照优先，预算 3000 内", 6);
+        ConversationMemoryLoader loader = new ConversationMemoryLoader(new AgentTurnPersistenceService(repo, jsonCodec), jsonCodec);
+
+        ConversationMemory memory = loader.load("c1", List.of(), Optional.of("请求传入摘要"));
+
+        assertThat(memory.summary()).contains("用户偏好拍照优先，预算 3000 内");
+        assertThat(memory.summaryMessageCount()).isEqualTo(6);
+        assertThat(memory.summaryModel()).isEqualTo(ConversationSummarizer.MODEL_NAME);
+    }
+
+    @Test
     void emptyOnFirstTurn() {
         ConversationMemoryLoader loader = new ConversationMemoryLoader(
                 new AgentTurnPersistenceService(new StubRepo(), jsonCodec), jsonCodec);
@@ -66,16 +80,33 @@ class ConversationMemoryLoaderTests {
             ));
         }
 
+        void appendSucceededWithSummary(String turnId, String conversationId, String summary, Integer messageCount) {
+            rows.put(turnId, new AgentTurnRecord(
+                    (long) rows.size() + 1,
+                    turnId, "corr-" + turnId, "u", conversationId, null, null, null,
+                    "SUCCEEDED", "msg", "RECOMMEND_VAGUE", "rule_l2", 0.85, "{}", "[]", "[]",
+                    true, "ans", summary, messageCount, ConversationSummarizer.MODEL_NAME,
+                    null, null, 100, null, null,
+                    OffsetDateTime.now(), OffsetDateTime.now()
+            ));
+        }
+
         @Override public void createRunning(String t, String c, String u, String cv, String r, String m) {}
         @Override public Optional<AgentTurnRecord> findByTurnId(String turnId) { return Optional.ofNullable(rows.get(turnId)); }
         @Override public Optional<AgentTurnRecord> findByRequestId(String u, String c, String r) { return Optional.empty(); }
         @Override public List<AgentTurnRecord> findRecentByConversationId(String conversationId, int limit) {
             return rows.values().stream().filter(r -> r.conversationId().equals(conversationId)).limit(limit).toList();
         }
+        @Override public Optional<AgentTurnRecord> findLatestMemorySummary(String conversationId) {
+            return rows.values().stream()
+                    .filter(r -> r.conversationId().equals(conversationId))
+                    .filter(r -> r.memorySummary() != null && !r.memorySummary().isBlank())
+                    .reduce((first, second) -> second);
+        }
         @Override public void attachConversationMessages(String t, String u, String a) {}
         @Override public void recordIntent(String t, String i, String s, Double c, String sj) {}
         @Override public void recordToolState(String t, String tc, String ce) {}
-        @Override public void markSucceeded(String t, String a, Boolean g, Integer ti, Integer to, Integer l) {}
+        @Override public void markSucceeded(String t, String a, Boolean g, Integer ti, Integer to, Integer l, String ms, Integer msc, String msm) {}
         @Override public void markFailed(String t, String c, String m, Integer l) {}
     }
 }

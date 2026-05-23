@@ -5,6 +5,7 @@ import com.bytedance.ai.agent.answer.CitationExtractor;
 import com.bytedance.ai.agent.api.AgentStreamEvent;
 import com.bytedance.ai.agent.api.AgentTurnFacade;
 import com.bytedance.ai.agent.api.AgentTurnRequest;
+import com.bytedance.ai.agent.api.CompareMatrixView;
 import com.bytedance.ai.agent.api.IntentType;
 import com.bytedance.ai.agent.api.Slot;
 import com.bytedance.ai.agent.api.SpuCardView;
@@ -13,11 +14,14 @@ import com.bytedance.ai.agent.intent.IntentClassification;
 import com.bytedance.ai.agent.intent.IntentClassifier;
 import com.bytedance.ai.agent.memory.ConversationMemory;
 import com.bytedance.ai.agent.memory.ConversationMemoryLoader;
+import com.bytedance.ai.agent.memory.ConversationSummarizer;
+import com.bytedance.ai.agent.memory.ConversationSummary;
 import com.bytedance.ai.agent.persistence.AgentTurnPersistenceService;
 import com.bytedance.ai.agent.persistence.AgentTurnRecord;
 import com.bytedance.ai.agent.slot.SlotExtractor;
 import com.bytedance.ai.agent.tool.AgentToolCallback;
 import com.bytedance.ai.agent.tool.ToolRegistry;
+import com.bytedance.ai.agent.tool.impl.CompareProductsToolCallback;
 import com.bytedance.ai.agent.tool.impl.SearchProductsToolCallback;
 import com.bytedance.ai.infrastructure.config.RagConcurrencyConfiguration;
 import com.bytedance.ai.retrieval.spi.AgentTurnConversationState;
@@ -51,6 +55,7 @@ public class AgentTurnService implements AgentTurnFacade {
     private final AgentTurnPersistenceService persistenceService;
     private final ConversationTurnAdapter conversationTurnAdapter;
     private final ConversationMemoryLoader memoryLoader;
+    private final ConversationSummarizer conversationSummarizer;
     private final IntentClassifier intentClassifier;
     private final SlotExtractor slotExtractor;
     private final ToolRegistry toolRegistry;
@@ -64,6 +69,7 @@ public class AgentTurnService implements AgentTurnFacade {
             AgentTurnPersistenceService persistenceService,
             ConversationTurnAdapter conversationTurnAdapter,
             ConversationMemoryLoader memoryLoader,
+            ConversationSummarizer conversationSummarizer,
             IntentClassifier intentClassifier,
             SlotExtractor slotExtractor,
             ToolRegistry toolRegistry,
@@ -76,6 +82,7 @@ public class AgentTurnService implements AgentTurnFacade {
         this.persistenceService = persistenceService;
         this.conversationTurnAdapter = conversationTurnAdapter;
         this.memoryLoader = memoryLoader;
+        this.conversationSummarizer = conversationSummarizer;
         this.intentClassifier = intentClassifier;
         this.slotExtractor = slotExtractor;
         this.toolRegistry = toolRegistry;
@@ -121,11 +128,14 @@ public class AgentTurnService implements AgentTurnFacade {
                     conversationState.assistantMessageId()
             );
 
-            ConversationMemory memory = memoryLoader.load(
-                    request.conversationId(),
+            ConversationMemory memory = memoryLoader.load(request.conversationId(), conversationState.history());
+            ConversationSummary summary = conversationSummarizer.summarize(
                     conversationState.history(),
-                    Optional.empty()
+                    memory.summary(),
+                    memory.summaryMessageCount()
             );
+            memory = memory.withSummary(summary);
+            state.memorySummary = summary;
             List<AgentStreamEvent> prefixEvents = new ArrayList<>();
             prefixEvents.add(eventFactory.turnStarted(state.correlationId, state.turnId, request.conversationId(), MODEL_NAME));
 
@@ -151,7 +161,7 @@ public class AgentTurnService implements AgentTurnFacade {
             if (classification.intent() == IntentType.OUT_OF_SCOPE) {
                 persistenceService.recordToolState(state.turnId, toolCalls, cards);
             } else {
-                executeTools(state, classification.intent(), slots, prefixEvents, cards, toolCalls);
+                executeTools(state, classification.intent(), slots, memory, prefixEvents, cards, toolCalls);
                 persistenceService.recordToolState(state.turnId, toolCalls, cards);
                 if (cards.isEmpty()) {
                     prefixEvents.add(eventFactory.notice(
@@ -163,7 +173,7 @@ public class AgentTurnService implements AgentTurnFacade {
                 }
             }
 
-            Flux<String> answerStream = answerStream(request, classification.intent(), cards, memory, state.generatedByModel);
+            Flux<String> answerStream = answerStream(request, classification.intent(), cards, state.compareMatrix, memory, state.generatedByModel);
             Flux<AgentStreamEvent> answerEvents = citationExtractor.toAnswerEvents(
                     answerStream.doOnNext(state.answerText::append),
                     cards,
@@ -209,12 +219,16 @@ public class AgentTurnService implements AgentTurnFacade {
             TurnExecutionState state,
             IntentType intent,
             Slot slots,
+            ConversationMemory memory,
             List<AgentStreamEvent> prefixEvents,
             List<SpuCardView> cards,
             List<ToolCallView> toolCalls
     ) {
+        List<String> restrictToSpuRefs = intent == IntentType.REFINE && memory != null
+                ? memory.lastTurnSpuRefs()
+                : List.of();
         for (AgentToolCallback callback : toolRegistry.plan(intent)) {
-            Map<String, Object> args = toolArgs(state.request.message(), slots);
+            Map<String, Object> args = toolArgs(state.request.message(), slots, restrictToSpuRefs);
             String toolName = callback.getToolDefinition().name();
             prefixEvents.add(eventFactory.toolCalling(state.correlationId, toolName, args));
             long started = System.nanoTime();
@@ -224,7 +238,8 @@ public class AgentTurnService implements AgentTurnFacade {
                                 state.request.message(),
                                 slots,
                                 10,
-                                List.of()
+                                List.of(),
+                                restrictToSpuRefs
                         )
                 );
                 cards.addAll(output.cards());
@@ -236,6 +251,27 @@ public class AgentTurnService implements AgentTurnFacade {
                         output.cards(),
                         output.facetsApplied()
                 ));
+            } else if (callback instanceof CompareProductsToolCallback compareProductsTool) {
+                CompareProductsToolCallback.CompareProductsOutput output = compareProductsTool.compare(
+                        new CompareProductsToolCallback.CompareProductsInput(
+                                state.request.message(),
+                                List.of(),
+                                List.of(),
+                                3,
+                                compareAspects(state.request.message())
+                        )
+                );
+                cards.addAll(output.cards());
+                state.compareMatrix = output.compareMatrix();
+                long latencyMs = Duration.ofNanos(System.nanoTime() - started).toMillis();
+                toolCalls.add(new ToolCallView(intent, toolName, args, latencyMs));
+                prefixEvents.add(eventFactory.toolResult(
+                        state.correlationId,
+                        output.toolName(),
+                        output.cards(),
+                        Map.of(),
+                        output.compareMatrix()
+                ));
             } else {
                 callback.call(jsonCodec.write(args));
                 long latencyMs = Duration.ofNanos(System.nanoTime() - started).toMillis();
@@ -244,19 +280,33 @@ public class AgentTurnService implements AgentTurnFacade {
         }
     }
 
-    private Map<String, Object> toolArgs(String message, Slot slots) {
+    private Map<String, Object> toolArgs(String message, Slot slots, List<String> restrictToSpuRefs) {
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("query", message);
         args.put("slots", slots);
         args.put("topK", 10);
         args.put("includeChunkTypes", List.of());
+        args.put("restrictToSpuRefs", restrictToSpuRefs == null ? List.of() : restrictToSpuRefs);
+        args.put("compareAspects", compareAspects(message));
         return args;
+    }
+
+    private List<String> compareAspects(String message) {
+        List<String> aspects = new ArrayList<>();
+        if (message != null && message.contains("保湿")) {
+            aspects.add("保湿");
+        }
+        if (message != null && message.contains("性价比")) {
+            aspects.add("性价比");
+        }
+        return aspects;
     }
 
     private Flux<String> answerStream(
             AgentTurnRequest request,
             IntentType intent,
             List<SpuCardView> cards,
+            CompareMatrixView compareMatrix,
             ConversationMemory memory,
             AtomicBoolean generatedByModel
     ) {
@@ -264,7 +314,7 @@ public class AgentTurnService implements AgentTurnFacade {
             generatedByModel.set(false);
             return Flux.just("我只能帮助你挑选和比较商品，暂时不能处理这个请求。你可以告诉我预算、品类或使用场景。");
         }
-        return answerGenerator.generateStream(request.message(), cards, memory, generatedByModel::set);
+        return answerGenerator.generateStream(request.message(), cards, compareMatrix, memory, generatedByModel::set);
     }
 
     private AgentStreamEvent completeTurn(TurnExecutionState state) {
@@ -273,7 +323,17 @@ public class AgentTurnService implements AgentTurnFacade {
             conversationTurnAdapter.complete(state.assistantMessageId, answer);
         }
         int latencyMs = (int) Duration.ofNanos(System.nanoTime() - state.startedNanos).toMillis();
-        persistenceService.markSucceeded(state.turnId, answer, state.generatedByModel.get(), null, null, latencyMs);
+        persistenceService.markSucceeded(
+                state.turnId,
+                answer,
+                state.generatedByModel.get(),
+                null,
+                null,
+                latencyMs,
+                state.memorySummary == null ? null : state.memorySummary.summary().orElse(null),
+                state.memorySummary == null ? null : state.memorySummary.messageCount(),
+                state.memorySummary == null ? null : state.memorySummary.model()
+        );
         return eventFactory.turnCompleted(state.correlationId, state.turnId, latencyMs, null, null, state.generatedByModel.get());
     }
 
@@ -304,6 +364,8 @@ public class AgentTurnService implements AgentTurnFacade {
         private final long startedNanos = System.nanoTime();
         private final StringBuilder answerText = new StringBuilder();
         private final AtomicBoolean generatedByModel = new AtomicBoolean(false);
+        private ConversationSummary memorySummary = ConversationSummary.empty();
+        private CompareMatrixView compareMatrix;
         private String assistantMessageId;
 
         private TurnExecutionState(AgentTurnRequest request) {

@@ -20,6 +20,8 @@ public interface AgentTurnRepository {
 
     List<AgentTurnRecord> findRecentByConversationId(String conversationId, int limit);
 
+    Optional<AgentTurnRecord> findLatestMemorySummary(String conversationId);
+
     void attachConversationMessages(String turnId, String userMessageId, String assistantMessageId);
 
     void recordIntent(String turnId, String intent, String source, Double confidence, String slotsJson);
@@ -32,7 +34,10 @@ public interface AgentTurnRepository {
             Boolean generatedByModel,
             Integer tokensIn,
             Integer tokensOut,
-            Integer latencyMs
+            Integer latencyMs,
+            String memorySummary,
+            Integer memorySummaryMessageCount,
+            String memorySummaryModel
     );
 
     void markFailed(String turnId, String errorCode, String errorMessage, Integer latencyMs);
