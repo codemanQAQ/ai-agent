@@ -1,0 +1,119 @@
+{
+  "datasetVersion": "w1-2026-05",
+  "description": "W1 验收用例：5 条基础推荐 + 5 条条件筛选。期望命中由 sample-catalog.json 推导；后续 W2 EvalRunner 直接读取本文件批量跑分。",
+  "catalogFixture": "src/test/resources/sample-catalog.json",
+  "cases": [
+    {
+      "id": "basic-01",
+      "category": "basic_recommend",
+      "intent": "RECOMMEND_VAGUE",
+      "query": "推荐一款适合通勤的双肩包",
+      "expectedSpuRefs": ["SPU-0001"],
+      "minHitsAt5": 1,
+      "notes": "纯语义命中；'通勤' + '双肩包' 应触发轻量通勤双肩包"
+    },
+    {
+      "id": "basic-02",
+      "category": "basic_recommend",
+      "intent": "RECOMMEND_VAGUE",
+      "query": "帮我找件适合上班穿的简约纯棉 T 恤",
+      "expectedSpuRefs": ["SPU-0002"],
+      "minHitsAt5": 1,
+      "notes": "'纯棉' + 'T 恤' 触发 SPU-0002"
+    },
+    {
+      "id": "basic-03",
+      "category": "basic_recommend",
+      "intent": "RECOMMEND_VAGUE",
+      "query": "有没有适合户外徒步的防水冲锋衣",
+      "expectedSpuRefs": ["SPU-0003"],
+      "minHitsAt5": 1,
+      "notes": "'户外' + '防水' + '冲锋衣' 触发 SPU-0003；不应错召羊毛西装"
+    },
+    {
+      "id": "basic-04",
+      "category": "basic_recommend",
+      "intent": "RECOMMEND_VAGUE",
+      "query": "推荐一款温和的油皮专用洁面",
+      "expectedSpuRefs": ["SPU-0008"],
+      "minHitsAt5": 1,
+      "notes": "'油皮' + '洁面' 命中 SPU-0008"
+    },
+    {
+      "id": "basic-05",
+      "category": "basic_recommend",
+      "intent": "RECOMMEND_VAGUE",
+      "query": "干皮急救用的玻尿酸补水精华有没有",
+      "expectedSpuRefs": ["SPU-0010"],
+      "minHitsAt5": 1,
+      "notes": "'干皮' + '玻尿酸' + '精华' 命中 SPU-0010"
+    },
+    {
+      "id": "filter-01",
+      "category": "filter_by_attr",
+      "intent": "FILTER_BY_ATTR",
+      "query": "200 元以下的双肩包",
+      "expectedSpuRefs": ["SPU-0001"],
+      "slotExpectations": {
+        "priceRange": {"max": 200},
+        "categoryHint": "双肩包"
+      },
+      "minHitsAt5": 1,
+      "notes": "价格表达式正则规则命中；意图分类应为 FILTER_BY_ATTR rule_l1"
+    },
+    {
+      "id": "filter-02",
+      "category": "filter_by_attr",
+      "intent": "FILTER_BY_ATTR",
+      "query": "1000 元以内能买到的主动降噪蓝牙耳机",
+      "expectedSpuRefs": ["SPU-0005"],
+      "slotExpectations": {
+        "priceRange": {"max": 1000}
+      },
+      "minHitsAt5": 1,
+      "notes": "Sony TWS 999 元；隐式价格上限触发"
+    },
+    {
+      "id": "filter-03",
+      "category": "filter_by_attr",
+      "intent": "FILTER_BY_ATTR",
+      "query": "5000 到 7000 元价位的轻薄笔记本",
+      "expectedSpuRefs": ["SPU-0007"],
+      "slotExpectations": {
+        "priceRange": {"min": 5000, "max": 7000}
+      },
+      "minHitsAt5": 1,
+      "notes": "价格区间正则；'轻薄' + '笔记本' 命中 SPU-0007 (5499-6299)"
+    },
+    {
+      "id": "filter-04",
+      "category": "filter_by_attr",
+      "intent": "FILTER_BY_ATTR",
+      "query": "Sony 品牌的蓝牙耳机有哪些",
+      "expectedSpuRefs": ["SPU-0005"],
+      "slotExpectations": {
+        "brands": ["Sony"]
+      },
+      "minHitsAt5": 1,
+      "notes": "品牌过滤；slot 抽取应填 brands=['Sony']"
+    },
+    {
+      "id": "filter-05",
+      "category": "filter_by_attr",
+      "intent": "FILTER_BY_ATTR",
+      "query": "不含酒精的防晒霜 200 元以下",
+      "expectedSpuRefs": ["SPU-0009"],
+      "slotExpectations": {
+        "priceRange": {"max": 200}
+      },
+      "minHitsAt5": 1,
+      "notes": "复合约束：价格 + 描述中提到'不含酒精'；W1 暂不解析 must_not（W2 反选加分项），故只检查价格 + 类目命中。SPU-0009 描述明确含'不含酒精'文本，应排首位"
+    }
+  ],
+  "metricsAtTopK": {
+    "hitRateAt5Target": 0.85,
+    "precisionAt5Target": 0.70,
+    "intentAccuracyTarget": 0.90,
+    "notes": "W1 仅作端到端可跑通验收；指标目标供 W2 EvalRunner 量化"
+  }
+}
