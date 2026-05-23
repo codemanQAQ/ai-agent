@@ -91,12 +91,14 @@ public record RagProperties(
     /**
      * Catalog 模块配置。
      *
+     * <p>并发字段（{@code extractionConcurrency} / {@code extractionQueueCapacity}）已随
+     * {@code catalogAttributeExecutor} 一并拆除，参见 {@code AGENT.md §3.9}；后续 RocketMQ
+     * Outbox 链路所需的 topic / tag / dispatch 间隔会在 commit 3 同步补回。
+     *
      * @param enabled                            是否启用 catalog 属性抽取（false 时 worker 不消费事件）
      * @param attributeExtractionTimeoutMillis   单次属性抽取超时，单位毫秒
      * @param attributeExtractionTemperature     属性抽取使用的模型 temperature
      * @param attributeExtractionSystemPrompt    属性抽取 system prompt
-     * @param extractionConcurrency              属性抽取异步线程池核心并发
-     * @param extractionQueueCapacity            属性抽取异步线程池队列长度
      */
     public record Catalog(
             @DefaultValue("true")
@@ -120,20 +122,10 @@ public record RagProperties(
                     - features：差异化卖点
                     严禁输出多余的解释、Markdown 代码块或前后缀，只输出 JSON。
                     """)
-            String attributeExtractionSystemPrompt,
-
-            @DefaultValue("4")
-            @Min(1)
-            @Max(64)
-            int extractionConcurrency,
-
-            @DefaultValue("128")
-            @Min(1)
-            @Max(10_000)
-            int extractionQueueCapacity
+            String attributeExtractionSystemPrompt
     ) {
         public static Catalog defaults() {
-            return new Catalog(true, 8_000L, 0.2d, "", 4, 128);
+            return new Catalog(true, 8_000L, 0.2d, "");
         }
     }
 

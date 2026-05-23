@@ -19,8 +19,12 @@ import java.util.Map;
  * 异步消费 {@link CatalogAttributeExtractRequestedEvent}：把 SPU 描述喂给 LLM，回填 attributes_json。
  *
  * <p>触发条件：{@link TransactionPhase#AFTER_COMMIT} 确保只在导入事务提交后才执行；
- * 执行路径：{@code catalogAttributeExecutor}（有界线程池，CallerRuns 拒绝策略），
- * 防止批量导入时瞬时打爆 Doubao RPM=700。
+ * 执行路径：{@code ragVirtualThreadExecutor}（虚拟线程，每任务一线程）——
+ * 项目并发政策禁止固定大小线程池，详见 {@code AGENT.md §3.9}。Doubao RPM=700 的限流由
+ * Gateway 层（W4）统一兜底，本 worker 不负责限流。
+ *
+ * <p>⚠️ 临时形态：本类是 catalog 抽属性切换到 RocketMQ Outbox 之前的桥接实现，
+ * 计划在 commit 3「catalog 抽属性切换 RocketMQ Outbox」中删除。
  *
  * <p>状态机：
  * <pre>
@@ -31,6 +35,7 @@ import java.util.Map;
  * <p>如果 {@code rag.catalog.enabled=false}，则直接吞掉事件不做任何工作，便于演示环境跳过 LLM。
  */
 @Component
+@Deprecated(forRemoval = true)
 class CatalogAttributeExtractWorker {
 
     private static final Logger log = LoggerFactory.getLogger(CatalogAttributeExtractWorker.class);
@@ -49,7 +54,7 @@ class CatalogAttributeExtractWorker {
         this.ragProperties = ragProperties;
     }
 
-    @Async(RagConcurrencyConfiguration.CATALOG_ATTRIBUTE_EXECUTOR)
+    @Async(RagConcurrencyConfiguration.RAG_VIRTUAL_THREAD_EXECUTOR)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onAttributeExtractRequested(CatalogAttributeExtractRequestedEvent event) {
         Long spuId = event.spuId();
