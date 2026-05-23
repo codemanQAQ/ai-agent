@@ -288,6 +288,46 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_rag_ask_runs_request
     ON rag_ask_runs(user_id, conversation_id, request_id)
     WHERE request_id IS NOT NULL;
 
+-- ============== Agent 模块 ==============
+CREATE TABLE IF NOT EXISTS agent_turn (
+                                          id                   BIGSERIAL PRIMARY KEY,
+                                          turn_id              VARCHAR(64)    NOT NULL UNIQUE,
+                                          correlation_id       VARCHAR(64)    NOT NULL UNIQUE,
+                                          user_id              VARCHAR(64)    NOT NULL,
+                                          conversation_id      VARCHAR(64)    NOT NULL,
+                                          request_id           VARCHAR(64),
+                                          user_message_id      VARCHAR(64),
+                                          assistant_message_id VARCHAR(64),
+                                          status               VARCHAR(16)    NOT NULL DEFAULT 'RUNNING',
+                                          user_message         TEXT           NOT NULL,
+                                          intent               VARCHAR(32),
+                                          intent_source        VARCHAR(16),
+                                          intent_confidence    NUMERIC(4, 3),
+                                          slots_json           JSONB          NOT NULL DEFAULT '{}'::jsonb,
+                                          tools_called         JSONB          NOT NULL DEFAULT '[]'::jsonb,
+                                          cards_emitted        JSONB          NOT NULL DEFAULT '[]'::jsonb,
+                                          generated_by_model   BOOLEAN,
+                                          answer_text          TEXT,
+                                          tokens_in            INTEGER,
+                                          tokens_out           INTEGER,
+                                          latency_ms           INTEGER,
+                                          error_code           VARCHAR(64),
+                                          error_message        TEXT,
+                                          started_at           TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
+                                          completed_at         TIMESTAMPTZ(6),
+                                          CONSTRAINT agent_turn_status_chk
+                                              CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+                                          CONSTRAINT agent_turn_intent_source_chk
+                                              CHECK (intent_source IN ('rule_l1', 'rule_l2', 'llm', 'fallback'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_turn_idempotency
+    ON agent_turn(user_id, conversation_id, request_id)
+    WHERE request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_turn_conv_started
+    ON agent_turn(conversation_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_turn_user_started
+    ON agent_turn(user_id, started_at DESC);
+
 -- 数据库层禁止使用外键约束；兼容已初始化过的环境，显式移除历史外键。
 ALTER TABLE rag_conversations
     DROP CONSTRAINT IF EXISTS fk_rag_conversations_user;
