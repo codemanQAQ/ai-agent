@@ -1,17 +1,18 @@
 package com.bytedance.ai.catalog.application;
 
-import com.bytedance.ai.catalog.api.CatalogAttributeExtractRequestedEvent;
 import com.bytedance.ai.catalog.api.CatalogSpuCreateRequest;
+import com.bytedance.ai.catalog.persistence.CatalogAttributeOutboxRepository;
 import com.bytedance.ai.catalog.persistence.CatalogSkuRepository;
 import com.bytedance.ai.catalog.persistence.CatalogSpuRecord;
 import com.bytedance.ai.catalog.persistence.CatalogSpuRepository;
 import com.bytedance.ai.document.api.DocumentCommandFacade;
 import com.bytedance.ai.document.api.RagDocumentCreateRequest;
 import com.bytedance.ai.document.api.RagDocumentView;
+import com.bytedance.ai.shared.support.RagJsonCodec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.context.ApplicationEventPublisher;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -23,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -32,15 +34,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * CatalogImportService 单元测试：覆盖双写 -> 回填 document_id -> 发事件这一关键路径，
- * 以及 createDocument 失败时的异常传播（让外层 REQUIRES_NEW 事务回滚）。
+ * CatalogImportService 单元测试：覆盖双写 -> 回填 document_id -> outbox 入队 这一关键路径，
+ * 以及 createDocument 失败时的异常传播（让外层 REQUIRES_NEW 事务回滚，连带 outbox 行也回滚）。
  */
 class CatalogImportServiceTests {
 
     private CatalogSpuRepository spuRepository;
     private CatalogSkuRepository skuRepository;
     private DocumentCommandFacade documentCommandFacade;
-    private ApplicationEventPublisher eventPublisher;
+    private CatalogAttributeOutboxRepository attributeOutboxRepository;
+    private RagJsonCodec jsonCodec;
     private CatalogImportService importService;
 
     @BeforeEach
@@ -48,18 +51,20 @@ class CatalogImportServiceTests {
         spuRepository = mock(CatalogSpuRepository.class);
         skuRepository = mock(CatalogSkuRepository.class);
         documentCommandFacade = mock(DocumentCommandFacade.class);
-        eventPublisher = mock(ApplicationEventPublisher.class);
+        attributeOutboxRepository = mock(CatalogAttributeOutboxRepository.class);
+        jsonCodec = new RagJsonCodec(JsonMapper.builder().build());
         importService = new CatalogImportService(
                 spuRepository,
                 skuRepository,
                 documentCommandFacade,
                 new SpuMarkdownRenderer(),
-                eventPublisher
+                attributeOutboxRepository,
+                jsonCodec
         );
     }
 
     @Test
-    void importOneWritesSpuSkusDocumentAndPublishesEvent() {
+    void importOneWritesSpuSkusDocumentAndEnqueuesOutbox() {
         CatalogSpuCreateRequest item = buildRequest("SPU-1", "短描述");
         CatalogSpuRecord savedSpu = stubSpu(7L, "SPU-1");
         when(spuRepository.save(
@@ -87,11 +92,11 @@ class CatalogImportServiceTests {
 
         verify(spuRepository).attachDocument(7L, 901L);
 
-        ArgumentCaptor<CatalogAttributeExtractRequestedEvent> eventCaptor =
-                ArgumentCaptor.forClass(CatalogAttributeExtractRequestedEvent.class);
-        verify(eventPublisher).publishEvent(eventCaptor.capture());
-        assertThat(eventCaptor.getValue().spuId()).isEqualTo(7L);
-        assertThat(eventCaptor.getValue().triggeredBy()).isEqualTo("import");
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(attributeOutboxRepository).enqueue(eq(7L), eq("SPU-1"), payloadCaptor.capture());
+        Map<String, Object> parsed = jsonCodec.readMap(payloadCaptor.getValue());
+        assertThat(parsed.get("triggeredBy")).isEqualTo("import");
+        assertThat(parsed.get("enqueuedAtMs")).isInstanceOf(Number.class);
     }
 
     @Test
@@ -127,7 +132,7 @@ class CatalogImportServiceTests {
                 .hasMessageContaining("document failed");
 
         verify(spuRepository, never()).attachDocument(any(), any());
-        verify(eventPublisher, never()).publishEvent(any());
+        verify(attributeOutboxRepository, never()).enqueue(anyLong(), anyString(), anyString());
     }
 
     private CatalogSpuCreateRequest buildRequest(String externalRef, String desc) {

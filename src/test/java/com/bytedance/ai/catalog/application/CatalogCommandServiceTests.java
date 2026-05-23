@@ -1,15 +1,16 @@
 package com.bytedance.ai.catalog.application;
 
-import com.bytedance.ai.catalog.api.CatalogAttributeExtractRequestedEvent;
 import com.bytedance.ai.catalog.api.CatalogImportRequest;
 import com.bytedance.ai.catalog.api.CatalogImportSummary;
 import com.bytedance.ai.catalog.api.CatalogSpuCreateRequest;
+import com.bytedance.ai.catalog.persistence.CatalogAttributeOutboxRepository;
 import com.bytedance.ai.catalog.persistence.CatalogSpuRecord;
 import com.bytedance.ai.catalog.persistence.CatalogSpuRepository;
+import com.bytedance.ai.shared.support.RagJsonCodec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.context.ApplicationEventPublisher;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -19,6 +20,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -26,21 +30,28 @@ import static org.mockito.Mockito.when;
 
 /**
  * CatalogCommandService 编排层单元测试：聚焦 importBatch 的"部分成功"汇总语义
- * 与 requestAttributeExtraction 的事件发布。
+ * 与 requestAttributeExtraction 的 outbox 入队（取代旧的事件发布）。
  */
 class CatalogCommandServiceTests {
 
     private CatalogImportService catalogImportService;
     private CatalogSpuRepository spuRepository;
-    private ApplicationEventPublisher eventPublisher;
+    private CatalogAttributeOutboxRepository attributeOutboxRepository;
+    private RagJsonCodec jsonCodec;
     private CatalogCommandService commandService;
 
     @BeforeEach
     void setUp() {
         catalogImportService = mock(CatalogImportService.class);
         spuRepository = mock(CatalogSpuRepository.class);
-        eventPublisher = mock(ApplicationEventPublisher.class);
-        commandService = new CatalogCommandService(catalogImportService, spuRepository, eventPublisher);
+        attributeOutboxRepository = mock(CatalogAttributeOutboxRepository.class);
+        jsonCodec = new RagJsonCodec(JsonMapper.builder().build());
+        commandService = new CatalogCommandService(
+                catalogImportService,
+                spuRepository,
+                attributeOutboxRepository,
+                jsonCodec
+        );
     }
 
     @Test
@@ -62,17 +73,18 @@ class CatalogCommandServiceTests {
     }
 
     @Test
-    void requestAttributeExtractionPublishesEventWithManualTrigger() {
+    void requestAttributeExtractionEnqueuesOutboxWithManualTrigger() {
         Long spuId = 42L;
         when(spuRepository.findById(spuId)).thenReturn(Optional.of(stubSpu(spuId, "SPU-42")));
 
         commandService.requestAttributeExtraction(spuId);
 
-        ArgumentCaptor<CatalogAttributeExtractRequestedEvent> captor =
-                ArgumentCaptor.forClass(CatalogAttributeExtractRequestedEvent.class);
-        verify(eventPublisher).publishEvent(captor.capture());
-        assertThat(captor.getValue().spuId()).isEqualTo(spuId);
-        assertThat(captor.getValue().triggeredBy()).isEqualTo("manual-retry");
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(attributeOutboxRepository).enqueue(eq(spuId), eq("SPU-42"), payloadCaptor.capture());
+
+        Map<String, Object> parsed = jsonCodec.readMap(payloadCaptor.getValue());
+        assertThat(parsed.get("triggeredBy")).isEqualTo("manual-retry");
+        assertThat(parsed.get("enqueuedAtMs")).isInstanceOf(Number.class);
     }
 
     @Test
@@ -82,7 +94,7 @@ class CatalogCommandServiceTests {
         assertThatThrownBy(() -> commandService.requestAttributeExtraction(99L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("99");
-        verify(eventPublisher, never()).publishEvent(any());
+        verify(attributeOutboxRepository, never()).enqueue(anyLong(), anyString(), anyString());
     }
 
     private CatalogSpuCreateRequest sampleItem(String externalRef) {

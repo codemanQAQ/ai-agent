@@ -1,16 +1,16 @@
 package com.bytedance.ai.catalog.application;
 
-import com.bytedance.ai.catalog.api.CatalogAttributeExtractRequestedEvent;
 import com.bytedance.ai.catalog.api.CatalogSpuCreateRequest;
+import com.bytedance.ai.catalog.persistence.CatalogAttributeOutboxRepository;
 import com.bytedance.ai.catalog.persistence.CatalogSkuRepository;
 import com.bytedance.ai.catalog.persistence.CatalogSpuRecord;
 import com.bytedance.ai.catalog.persistence.CatalogSpuRepository;
 import com.bytedance.ai.document.api.DocumentCommandFacade;
 import com.bytedance.ai.document.api.RagDocumentCreateRequest;
 import com.bytedance.ai.document.api.RagDocumentView;
+import com.bytedance.ai.shared.support.RagJsonCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +24,10 @@ import java.util.Map;
  * 单条 SPU 的事务化导入服务。拆出独立 bean 是为了让 Spring 代理生效——
  * {@link CatalogCommandService#importBatch} 调用本类时会通过容器代理，
  * 单条失败由本类抛错回滚，由调用方记录失败明细并继续下一条。
+ *
+ * <p>导入流程末尾调 {@link CatalogAttributeOutboxRepository#enqueue}，
+ * 利用同事务保证「SPU 落库 + 双写 rag_documents + outbox 行」三者要么全部成功要么全部回滚，
+ * 后台 dispatcher 看到 outbox 行后才会真正投递 RocketMQ，参见 {@code AGENT.md §3.9}。
  */
 @Service
 class CatalogImportService {
@@ -37,20 +41,23 @@ class CatalogImportService {
     private final CatalogSkuRepository skuRepository;
     private final DocumentCommandFacade documentCommandFacade;
     private final SpuMarkdownRenderer markdownRenderer;
-    private final ApplicationEventPublisher eventPublisher;
+    private final CatalogAttributeOutboxRepository attributeOutboxRepository;
+    private final RagJsonCodec jsonCodec;
 
     CatalogImportService(
             CatalogSpuRepository spuRepository,
             CatalogSkuRepository skuRepository,
             DocumentCommandFacade documentCommandFacade,
             SpuMarkdownRenderer markdownRenderer,
-            ApplicationEventPublisher eventPublisher
+            CatalogAttributeOutboxRepository attributeOutboxRepository,
+            RagJsonCodec jsonCodec
     ) {
         this.spuRepository = spuRepository;
         this.skuRepository = skuRepository;
         this.documentCommandFacade = documentCommandFacade;
         this.markdownRenderer = markdownRenderer;
-        this.eventPublisher = eventPublisher;
+        this.attributeOutboxRepository = attributeOutboxRepository;
+        this.jsonCodec = jsonCodec;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -91,7 +98,7 @@ class CatalogImportService {
         ));
         spuRepository.attachDocument(spu.id(), created.id());
 
-        eventPublisher.publishEvent(new CatalogAttributeExtractRequestedEvent(spu.id(), IMPORT_TRIGGER));
+        attributeOutboxRepository.enqueue(spu.id(), spu.externalRef(), buildOutboxPayload(IMPORT_TRIGGER));
 
         log.info(
                 "catalog SPU imported: spuId={}, externalRef={}, documentId={}",
@@ -100,6 +107,13 @@ class CatalogImportService {
                 created.id()
         );
         return spu.id();
+    }
+
+    private String buildOutboxPayload(String trigger) {
+        return jsonCodec.write(Map.of(
+                "triggeredBy", trigger,
+                "enqueuedAtMs", System.currentTimeMillis()
+        ));
     }
 
     private Map<String, Object> buildDocumentMetadata(CatalogSpuRecord spu, CatalogSpuCreateRequest item) {

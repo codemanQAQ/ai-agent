@@ -7,8 +7,9 @@ public interface CatalogCommandFacade {
 
     /**
      * 批量导入 SPU。逐条事务化，失败的条目记录到 {@link CatalogImportSummary#failures()} 中并继续；
-     * 成功的条目会触发 {@code DocumentIndexRequestedEvent}（由 document 模块产生）以及
-     * {@code CatalogAttributeExtractRequestedEvent}（由 catalog 模块产生）。
+     * 成功的条目会触发 {@code DocumentIndexRequestedEvent}（由 document 模块产生）以及在
+     * {@code catalog_attribute_outbox} 写入一行 PENDING（由 catalog 自身的 dispatcher → RocketMQ
+     * 链路异步消费）。
      */
     CatalogImportSummary importBatch(CatalogImportRequest request);
 

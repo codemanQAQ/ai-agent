@@ -1,23 +1,24 @@
 package com.bytedance.ai.catalog;
 
-import com.bytedance.ai.catalog.api.CatalogAttributeExtractRequestedEvent;
 import com.bytedance.ai.catalog.api.CatalogCommandFacade;
 import com.bytedance.ai.catalog.api.CatalogImportRequest;
 import com.bytedance.ai.catalog.api.CatalogImportSummary;
 import com.bytedance.ai.catalog.api.CatalogQueryFacade;
 import com.bytedance.ai.catalog.api.CatalogSpuCreateRequest;
 import com.bytedance.ai.catalog.api.CatalogSpuView;
+import com.bytedance.ai.catalog.persistence.CatalogAttributeOutboxRecord;
+import com.bytedance.ai.catalog.persistence.CatalogAttributeOutboxRepository;
 import com.bytedance.ai.document.api.DocumentIndexRequestedEvent;
 import com.bytedance.ai.indexing.api.IndexingCommandFacade;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -31,12 +32,13 @@ import static org.awaitility.Awaitility.await;
  * Catalog 模块端到端集成测试。
  *
  * <p>用全量 {@link SpringBootTest} 而非 {@code @ApplicationModuleTest}：
- * 因为属性抽取链路（worker → extractor）在构造期已经依赖 RagProperties，
+ * 因为属性抽取链路（producer / dispatcher / listener）在构造期已经依赖 RagProperties，
  * 这条依赖通过 {@code @EnableConfigurationProperties} 注册在 RagConfiguration，
  * 完整启动上下文最直接地保证它存在。
  *
- * <p>{@code rag.catalog.enabled=false} 关掉 worker 真正调用 LLM，
- * 事件本身仍会通过同步 {@code @EventListener} 探针被捕获并断言。
+ * <p>{@code rag.catalog.enabled=false} 关掉 listener 实际调 LLM；
+ * {@code rag.rocketmq.enabled=false} 关掉 producer 与 dispatcher 装配，
+ * outbox 行入库后保持 PENDING 即可，用于断言"导入事务成功写出 outbox 行"。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("test")
@@ -44,7 +46,8 @@ import static org.awaitility.Awaitility.await;
 @TestPropertySource(properties = {
         "spring.sql.init.mode=always",
         "spring.sql.init.schema-locations=classpath:schema-modulith.sql",
-        "rag.catalog.enabled=false"
+        "rag.catalog.enabled=false",
+        "rag.rocketmq.enabled=false"
 })
 class CatalogModuleTests {
 
@@ -53,6 +56,9 @@ class CatalogModuleTests {
 
     @Autowired
     private CatalogQueryFacade catalogQueryFacade;
+
+    @Autowired
+    private CatalogAttributeOutboxRepository attributeOutboxRepository;
 
     @Autowired
     private CatalogTestEventProbe eventProbe;
@@ -71,7 +77,7 @@ class CatalogModuleTests {
     }
 
     @Test
-    void importBatchDoubleWritesAndTriggersIndexingEvent() {
+    void importBatchDoubleWritesAndEnqueuesOutbox() {
         eventProbe.clear();
         CatalogImportRequest request = new CatalogImportRequest(List.of(sample("SPU-M-1")));
 
@@ -90,12 +96,15 @@ class CatalogModuleTests {
 
         await().untilAsserted(() -> {
             assertThat(eventProbe.indexEvents())
-                    .as("应发布 DocumentIndexRequestedEvent")
+                    .as("应发布 DocumentIndexRequestedEvent（catalog → document 跨模块事件保留）")
                     .anyMatch(e -> e.documentId().equals(view.documentId())
                             && "document-command-service".equals(e.triggeredBy()));
-            assertThat(eventProbe.attributeEvents())
-                    .as("应发布 CatalogAttributeExtractRequestedEvent")
-                    .anyMatch(e -> e.spuId().equals(spuId) && "import".equals(e.triggeredBy()));
+
+            CatalogAttributeOutboxRecord row = attributeOutboxRepository.findLatestBySpuId(spuId).orElseThrow();
+            assertThat(row.status())
+                    .as("rag.rocketmq.enabled=false 时 outbox 行应保持 PENDING")
+                    .isEqualTo("PENDING");
+            assertThat(row.externalRef()).isEqualTo("SPU-M-1");
         });
     }
 
@@ -137,35 +146,25 @@ class CatalogModuleTests {
     }
 
     /**
-     * 用同步 {@link EventListener} 捕获两类事件，避免对 Modulith Scenario 的依赖。
-     * 事件由 catalog/document 模块同步发布在事务边界附近，单测里完全可用。
+     * 用同步 {@link EventListener} 捕获跨模块事件 {@link DocumentIndexRequestedEvent}，
+     * 验证 catalog 仍然按 document 模块的契约发起索引；catalog 内部不再有事件路径，
+     * 改由 outbox 表承载，详见 {@link CatalogAttributeOutboxRepository}。
      */
     @Component
     static class CatalogTestEventProbe {
         private final List<DocumentIndexRequestedEvent> indexEvents = new CopyOnWriteArrayList<>();
-        private final List<CatalogAttributeExtractRequestedEvent> attributeEvents = new CopyOnWriteArrayList<>();
 
         @EventListener
         void onIndex(DocumentIndexRequestedEvent event) {
             indexEvents.add(event);
         }
 
-        @EventListener
-        void onAttribute(CatalogAttributeExtractRequestedEvent event) {
-            attributeEvents.add(event);
-        }
-
         List<DocumentIndexRequestedEvent> indexEvents() {
             return List.copyOf(indexEvents);
         }
 
-        List<CatalogAttributeExtractRequestedEvent> attributeEvents() {
-            return List.copyOf(attributeEvents);
-        }
-
         void clear() {
             indexEvents.clear();
-            attributeEvents.clear();
         }
     }
 }

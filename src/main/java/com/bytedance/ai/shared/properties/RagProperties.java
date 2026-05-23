@@ -91,14 +91,24 @@ public record RagProperties(
     /**
      * Catalog 模块配置。
      *
-     * <p>并发字段（{@code extractionConcurrency} / {@code extractionQueueCapacity}）已随
-     * {@code catalogAttributeExecutor} 一并拆除，参见 {@code AGENT.md §3.9}；后续 RocketMQ
-     * Outbox 链路所需的 topic / tag / dispatch 间隔会在 commit 3 同步补回。
+     * <p>抽属性链路改造为 RocketMQ Outbox 模式后，本配置包含三类字段：
+     * <ul>
+     *   <li>LLM 行为：{@code attributeExtractionTimeoutMillis / Temperature / SystemPrompt}</li>
+     *   <li>RocketMQ 投递：{@code rocketMqTopic / rocketMqTag / consumerGroup}</li>
+     *   <li>Outbox 调度：{@code dispatchFixedDelayMillis / outboxBatchSize / failureBackoffMillis / sendingStaleMillis}</li>
+     * </ul>
      *
-     * @param enabled                            是否启用 catalog 属性抽取（false 时 worker 不消费事件）
-     * @param attributeExtractionTimeoutMillis   单次属性抽取超时，单位毫秒
-     * @param attributeExtractionTemperature     属性抽取使用的模型 temperature
-     * @param attributeExtractionSystemPrompt    属性抽取 system prompt
+     * @param enabled                          是否启用 catalog 属性抽取（false 时 listener 立即 ack 不调 LLM）
+     * @param attributeExtractionTimeoutMillis 单次属性抽取超时，单位毫秒
+     * @param attributeExtractionTemperature   属性抽取使用的模型 temperature
+     * @param attributeExtractionSystemPrompt  属性抽取 system prompt
+     * @param rocketMqTopic                    catalog 抽属性 topic
+     * @param rocketMqTag                      RocketMQ tag
+     * @param consumerGroup                    RocketMQ 消费组
+     * @param dispatchFixedDelayMillis         Outbox dispatcher 扫表固定间隔，单位毫秒
+     * @param outboxBatchSize                  Outbox dispatcher 单次扫描批量
+     * @param failureBackoffMillis             投递失败后的退避时间，单位毫秒
+     * @param sendingStaleMillis               SENDING 状态判定为卡住的阈值，单位毫秒
      */
     public record Catalog(
             @DefaultValue("true")
@@ -122,10 +132,51 @@ public record RagProperties(
                     - features：差异化卖点
                     严禁输出多余的解释、Markdown 代码块或前后缀，只输出 JSON。
                     """)
-            String attributeExtractionSystemPrompt
+            String attributeExtractionSystemPrompt,
+
+            @DefaultValue("catalog-attribute-extract")
+            String rocketMqTopic,
+
+            @DefaultValue("attribute-extract")
+            String rocketMqTag,
+
+            @DefaultValue("catalog-attribute-consumer")
+            String consumerGroup,
+
+            @DefaultValue("1000")
+            @Min(100)
+            @Max(60_000)
+            long dispatchFixedDelayMillis,
+
+            @DefaultValue("20")
+            @Min(1)
+            @Max(500)
+            int outboxBatchSize,
+
+            @DefaultValue("5000")
+            @Min(0)
+            @Max(3_600_000)
+            long failureBackoffMillis,
+
+            @DefaultValue("60000")
+            @Min(1000)
+            @Max(3_600_000)
+            long sendingStaleMillis
     ) {
         public static Catalog defaults() {
-            return new Catalog(true, 8_000L, 0.2d, "");
+            return new Catalog(
+                    true,
+                    8_000L,
+                    0.2d,
+                    "",
+                    "catalog-attribute-extract",
+                    "attribute-extract",
+                    "catalog-attribute-consumer",
+                    1_000L,
+                    20,
+                    5_000L,
+                    60_000L
+            );
         }
     }
 

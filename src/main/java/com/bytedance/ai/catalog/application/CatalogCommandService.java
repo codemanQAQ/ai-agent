@@ -1,19 +1,20 @@
 package com.bytedance.ai.catalog.application;
 
-import com.bytedance.ai.catalog.api.CatalogAttributeExtractRequestedEvent;
 import com.bytedance.ai.catalog.api.CatalogCommandFacade;
 import com.bytedance.ai.catalog.api.CatalogImportRequest;
 import com.bytedance.ai.catalog.api.CatalogImportSummary;
 import com.bytedance.ai.catalog.api.CatalogSpuCreateRequest;
+import com.bytedance.ai.catalog.persistence.CatalogAttributeOutboxRepository;
 import com.bytedance.ai.catalog.persistence.CatalogSpuRecord;
 import com.bytedance.ai.catalog.persistence.CatalogSpuRepository;
+import com.bytedance.ai.shared.support.RagJsonCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Catalog 写入侧 Facade 实现。
@@ -30,16 +31,19 @@ class CatalogCommandService implements CatalogCommandFacade {
 
     private final CatalogImportService catalogImportService;
     private final CatalogSpuRepository spuRepository;
-    private final ApplicationEventPublisher eventPublisher;
+    private final CatalogAttributeOutboxRepository attributeOutboxRepository;
+    private final RagJsonCodec jsonCodec;
 
     CatalogCommandService(
             CatalogImportService catalogImportService,
             CatalogSpuRepository spuRepository,
-            ApplicationEventPublisher eventPublisher
+            CatalogAttributeOutboxRepository attributeOutboxRepository,
+            RagJsonCodec jsonCodec
     ) {
         this.catalogImportService = catalogImportService;
         this.spuRepository = spuRepository;
-        this.eventPublisher = eventPublisher;
+        this.attributeOutboxRepository = attributeOutboxRepository;
+        this.jsonCodec = jsonCodec;
     }
 
     @Override
@@ -74,7 +78,11 @@ class CatalogCommandService implements CatalogCommandFacade {
     public void requestAttributeExtraction(Long spuId) {
         CatalogSpuRecord record = spuRepository.findById(spuId)
                 .orElseThrow(() -> new IllegalArgumentException("catalog_spu 不存在: " + spuId));
-        eventPublisher.publishEvent(new CatalogAttributeExtractRequestedEvent(record.id(), MANUAL_TRIGGER));
+        String payload = jsonCodec.write(Map.of(
+                "triggeredBy", MANUAL_TRIGGER,
+                "enqueuedAtMs", System.currentTimeMillis()
+        ));
+        attributeOutboxRepository.enqueue(record.id(), record.externalRef(), payload);
         log.info(
                 "catalog attribute extraction requested manually: spuId={}, externalRef={}",
                 spuId,
