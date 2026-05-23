@@ -6,6 +6,7 @@ import com.bytedance.ai.agent.api.AgentStreamEvent;
 import com.bytedance.ai.agent.api.AgentTurnRequest;
 import com.bytedance.ai.agent.api.IntentType;
 import com.bytedance.ai.agent.api.Slot;
+import com.bytedance.ai.agent.memory.ConversationMemoryLoader;
 import com.bytedance.ai.agent.persistence.AgentTurnPersistenceService;
 import com.bytedance.ai.agent.persistence.AgentTurnRecord;
 import com.bytedance.ai.agent.persistence.AgentTurnRepository;
@@ -101,7 +102,7 @@ class AgentTurnServiceTests {
     private AgentTurnService service(InMemoryAgentTurnRepository repository, String message) {
         AgentTurnPersistenceService persistenceService = new AgentTurnPersistenceService(repository, jsonCodec);
         ConversationTurnAdapter conversationTurnAdapter = new ConversationTurnAdapter(new StubConversationSpi());
-        SlotExtractor slotExtractor = (ignored, intent) -> intent == IntentType.FILTER_BY_ATTR
+        SlotExtractor slotExtractor = (ignored, intent, memory) -> intent == IntentType.FILTER_BY_ATTR
                 ? new Slot(List.of("轻便"), List.of(), new Slot.PriceRange(null, new BigDecimal("300")), "箱包", List.of(), null)
                 : Slot.empty();
         SearchProductsToolCallback searchProductsTool = new SearchProductsToolCallback(
@@ -109,9 +110,11 @@ class AgentTurnServiceTests {
                 new StubCatalogQueryFacade(),
                 jsonCodec
         );
+        ConversationMemoryLoader memoryLoader = new ConversationMemoryLoader(persistenceService, jsonCodec);
         return new AgentTurnService(
                 persistenceService,
                 conversationTurnAdapter,
+                memoryLoader,
                 new com.bytedance.ai.agent.intent.RuleBasedIntentClassifier(),
                 slotExtractor,
                 new ToolRegistry(List.of(searchProductsTool)),

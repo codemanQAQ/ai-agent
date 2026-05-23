@@ -11,6 +11,8 @@ import com.bytedance.ai.agent.api.SpuCardView;
 import com.bytedance.ai.agent.api.ToolCallView;
 import com.bytedance.ai.agent.intent.IntentClassification;
 import com.bytedance.ai.agent.intent.IntentClassifier;
+import com.bytedance.ai.agent.memory.ConversationMemory;
+import com.bytedance.ai.agent.memory.ConversationMemoryLoader;
 import com.bytedance.ai.agent.persistence.AgentTurnPersistenceService;
 import com.bytedance.ai.agent.persistence.AgentTurnRecord;
 import com.bytedance.ai.agent.slot.SlotExtractor;
@@ -37,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
@@ -47,6 +50,7 @@ public class AgentTurnService implements AgentTurnFacade {
 
     private final AgentTurnPersistenceService persistenceService;
     private final ConversationTurnAdapter conversationTurnAdapter;
+    private final ConversationMemoryLoader memoryLoader;
     private final IntentClassifier intentClassifier;
     private final SlotExtractor slotExtractor;
     private final ToolRegistry toolRegistry;
@@ -59,6 +63,7 @@ public class AgentTurnService implements AgentTurnFacade {
     public AgentTurnService(
             AgentTurnPersistenceService persistenceService,
             ConversationTurnAdapter conversationTurnAdapter,
+            ConversationMemoryLoader memoryLoader,
             IntentClassifier intentClassifier,
             SlotExtractor slotExtractor,
             ToolRegistry toolRegistry,
@@ -70,6 +75,7 @@ public class AgentTurnService implements AgentTurnFacade {
     ) {
         this.persistenceService = persistenceService;
         this.conversationTurnAdapter = conversationTurnAdapter;
+        this.memoryLoader = memoryLoader;
         this.intentClassifier = intentClassifier;
         this.slotExtractor = slotExtractor;
         this.toolRegistry = toolRegistry;
@@ -115,11 +121,16 @@ public class AgentTurnService implements AgentTurnFacade {
                     conversationState.assistantMessageId()
             );
 
+            ConversationMemory memory = memoryLoader.load(
+                    request.conversationId(),
+                    conversationState.history(),
+                    Optional.empty()
+            );
             List<AgentStreamEvent> prefixEvents = new ArrayList<>();
             prefixEvents.add(eventFactory.turnStarted(state.correlationId, state.turnId, request.conversationId(), MODEL_NAME));
 
-            IntentClassification classification = intentClassifier.classify(request.message());
-            Slot slots = slotExtractor.extract(request.message(), classification.intent());
+            IntentClassification classification = intentClassifier.classify(request.message(), memory);
+            Slot slots = slotExtractor.extract(request.message(), classification.intent(), memory);
             persistenceService.recordIntent(
                     state.turnId,
                     classification.intent().name(),
@@ -152,7 +163,7 @@ public class AgentTurnService implements AgentTurnFacade {
                 }
             }
 
-            Flux<String> answerStream = answerStream(request, classification.intent(), cards, state.generatedByModel);
+            Flux<String> answerStream = answerStream(request, classification.intent(), cards, memory, state.generatedByModel);
             Flux<AgentStreamEvent> answerEvents = citationExtractor.toAnswerEvents(
                     answerStream.doOnNext(state.answerText::append),
                     cards,
@@ -246,13 +257,14 @@ public class AgentTurnService implements AgentTurnFacade {
             AgentTurnRequest request,
             IntentType intent,
             List<SpuCardView> cards,
+            ConversationMemory memory,
             AtomicBoolean generatedByModel
     ) {
         if (intent == IntentType.OUT_OF_SCOPE) {
             generatedByModel.set(false);
             return Flux.just("我只能帮助你挑选和比较商品，暂时不能处理这个请求。你可以告诉我预算、品类或使用场景。");
         }
-        return answerGenerator.generateStream(request.message(), cards, generatedByModel::set);
+        return answerGenerator.generateStream(request.message(), cards, memory, generatedByModel::set);
     }
 
     private AgentStreamEvent completeTurn(TurnExecutionState state) {

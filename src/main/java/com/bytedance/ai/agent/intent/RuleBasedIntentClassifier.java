@@ -1,17 +1,21 @@
 package com.bytedance.ai.agent.intent;
 
 import com.bytedance.ai.agent.api.IntentType;
+import com.bytedance.ai.agent.memory.ConversationMemory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 /**
  * W1 规则路由：OOS / 价格过滤 / 推荐动词 / RECOMMEND_VAGUE 兜底。
+ *
+ * <p>W2 起接收 {@link ConversationMemory}：当上一轮已经返回过商品卡片且本轮命中
+ * REFINE 关键词（"再贵一点 / 便宜些 / 只要 X 品牌"等），改判为 REFINE。
  */
 @Component
 public class RuleBasedIntentClassifier implements IntentClassifier {
 
     @Override
-    public IntentClassification classify(String message) {
+    public IntentClassification classify(String message, ConversationMemory memory) {
         String normalized = normalize(message);
         if (!StringUtils.hasText(normalized)) {
             return fallback();

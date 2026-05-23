@@ -2,6 +2,7 @@ package com.bytedance.ai.agent.slot;
 
 import com.bytedance.ai.agent.api.IntentType;
 import com.bytedance.ai.agent.api.Slot;
+import com.bytedance.ai.agent.memory.ConversationMemory;
 import com.bytedance.ai.shared.support.RagJsonCodec;
 import com.bytedance.ai.shared.support.RagLogHelper;
 import org.slf4j.Logger;
@@ -39,10 +40,20 @@ public class LlmSlotExtractor implements SlotExtractor {
     }
 
     @Override
-    public Slot extract(String message, IntentType intent) {
+    public Slot extract(String message, IntentType intent, ConversationMemory memory) {
         if (!StringUtils.hasText(message) || intent == IntentType.OUT_OF_SCOPE) {
             return Slot.empty();
         }
+        if (intent == IntentType.REFINE && memory != null && memory.lastTurnSlots().isPresent()) {
+            // REFINE 拿上一轮槽位做基线，本轮只从 message 中抽变化量再合并。
+            Slot baseline = memory.lastTurnSlots().get();
+            Slot delta = doExtract(message, intent);
+            return mergeForRefine(baseline, delta);
+        }
+        return doExtract(message, intent);
+    }
+
+    Slot doExtract(String message, IntentType intent) {
         ChatModel chatModel = chatModelProvider.getIfAvailable();
         if (chatModel == null) {
             return fallback(message);
@@ -79,6 +90,49 @@ public class LlmSlotExtractor implements SlotExtractor {
                 stringList(map.get("brands")),
                 null
         );
+    }
+
+    /**
+     * REFINE 合并策略：以 baseline 为底，delta 中非空的字段覆盖之；
+     * priceRange 取交集（更紧的边界胜出），brands / must 直接以 delta 替换（用户明确说"换品牌"时不带前缀）。
+     */
+    Slot mergeForRefine(Slot baseline, Slot delta) {
+        if (baseline == null) {
+            return delta;
+        }
+        if (delta == null || delta.isEmpty()) {
+            return baseline;
+        }
+        List<String> must = delta.must().isEmpty() ? baseline.must() : delta.must();
+        List<String> brands = delta.brands().isEmpty() ? baseline.brands() : delta.brands();
+        String categoryHint = StringUtils.hasText(delta.categoryHint()) ? delta.categoryHint() : baseline.categoryHint();
+        String scenario = StringUtils.hasText(delta.scenario()) ? delta.scenario() : baseline.scenario();
+        Slot.PriceRange priceRange = tightenPriceRange(baseline.priceRange(), delta.priceRange());
+        return new Slot(must, List.of(), priceRange, categoryHint, brands, scenario);
+    }
+
+    private Slot.PriceRange tightenPriceRange(Slot.PriceRange baseline, Slot.PriceRange delta) {
+        if (baseline == null || baseline.isEmpty()) {
+            return delta;
+        }
+        if (delta == null || delta.isEmpty()) {
+            return baseline;
+        }
+        BigDecimal min = max(baseline.min(), delta.min());
+        BigDecimal max = min(baseline.max(), delta.max());
+        return new Slot.PriceRange(min, max);
+    }
+
+    private BigDecimal max(BigDecimal a, BigDecimal b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        return a.compareTo(b) >= 0 ? a : b;
+    }
+
+    private BigDecimal min(BigDecimal a, BigDecimal b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        return a.compareTo(b) <= 0 ? a : b;
     }
 
     Slot fallback(String message) {

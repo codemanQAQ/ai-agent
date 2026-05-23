@@ -1,6 +1,8 @@
 package com.bytedance.ai.agent.answer;
 
 import com.bytedance.ai.agent.api.SpuCardView;
+import com.bytedance.ai.agent.memory.ConversationMemory;
+import com.bytedance.ai.retrieval.spi.AgentTurnConversationState.ConversationTurn;
 import com.bytedance.ai.shared.support.RagLogHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +44,15 @@ public class AgentAnswerGenerator {
             List<SpuCardView> cards,
             Consumer<Boolean> generatedByModelCallback
     ) {
+        return generateStream(message, cards, ConversationMemory.empty(), generatedByModelCallback);
+    }
+
+    public Flux<String> generateStream(
+            String message,
+            List<SpuCardView> cards,
+            ConversationMemory memory,
+            Consumer<Boolean> generatedByModelCallback
+    ) {
         if (cards == null || cards.isEmpty()) {
             generatedByModelCallback.accept(false);
             return Flux.just("目前没有完全匹配的商品。你可以补充预算、品牌、使用场景或必须具备的功能，我再帮你缩小范围。");
@@ -55,7 +66,7 @@ public class AgentAnswerGenerator {
             Flux<String> stream = ChatClient.create(chatModel)
                     .prompt()
                     .system(promptTemplate())
-                    .user(buildUserPrompt(message, cards))
+                    .user(buildUserPrompt(message, cards, memory))
                     .stream()
                     .content()
                     .doOnSubscribe(ignored -> generatedByModelCallback.accept(true))
@@ -85,8 +96,22 @@ public class AgentAnswerGenerator {
         }
     }
 
-    private String buildUserPrompt(String message, List<SpuCardView> cards) {
+    private String buildUserPrompt(String message, List<SpuCardView> cards, ConversationMemory memory) {
         StringBuilder builder = new StringBuilder();
+        if (memory != null && memory.summary().isPresent()) {
+            builder.append("【会话摘要】\n").append(memory.summary().get().trim()).append("\n\n");
+        }
+        if (memory != null && !memory.recentMessages().isEmpty()) {
+            builder.append("【最近对话】\n");
+            for (ConversationTurn turn : memory.recentMessages()) {
+                builder.append("- ")
+                        .append("user".equals(turn.role()) ? "用户" : "助手")
+                        .append("：")
+                        .append(nullToEmpty(turn.content()).trim())
+                        .append("\n");
+            }
+            builder.append("\n");
+        }
         builder.append("【候选商品】\n");
         for (int i = 0; i < cards.size(); i++) {
             SpuCardView card = cards.get(i);
