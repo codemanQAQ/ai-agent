@@ -10,6 +10,7 @@ import com.bytedance.ai.catalog.persistence.CatalogSpuRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 class CatalogQueryService implements CatalogQueryFacade {
@@ -30,6 +31,19 @@ class CatalogQueryService implements CatalogQueryFacade {
                 .map(CatalogQueryService::toSkuView)
                 .toList();
         return toSpuView(record, skuViews);
+    }
+
+    @Override
+    public Optional<CatalogSpuView> findSpuByExternalRef(String externalRef) {
+        if (externalRef == null || externalRef.isBlank()) {
+            return Optional.empty();
+        }
+        return spuRepository.findByExternalRef(externalRef).map(record -> {
+            List<CatalogSkuView> skuViews = skuRepository.findBySpuId(record.id()).stream()
+                    .map(CatalogQueryService::toSkuView)
+                    .toList();
+            return toSpuView(record, skuViews);
+        });
     }
 
     @Override

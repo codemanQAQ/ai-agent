@@ -336,15 +336,24 @@ public class RagIndexingService {
         );
         currentState.set(IndexWorkflowState.COMMIT_INDEX);
 
-        milvusVectorIndexer.add(document, savedChunks);
-        vectorWriteApplied.set(true);
-        log.debug(
-                "RAG 向量提交完成。documentId={}, targetGeneration={}, chunkCount={}, usedCustomMilvusIndexer={}",
-                documentId,
-                indexGeneration,
-                savedChunks.size(),
-                milvusVectorIndexer
-        );
+        if (milvusVectorIndexer != null) {
+            milvusVectorIndexer.add(document, savedChunks);
+            vectorWriteApplied.set(true);
+            log.debug(
+                    "RAG 向量提交完成。documentId={}, targetGeneration={}, chunkCount={}, usedCustomMilvusIndexer={}",
+                    documentId,
+                    indexGeneration,
+                    savedChunks.size(),
+                    milvusVectorIndexer
+            );
+        } else {
+            log.debug(
+                    "RAG 向量提交跳过。documentId={}, targetGeneration={}, chunkCount={}, reason=milvus_disabled",
+                    documentId,
+                    indexGeneration,
+                    savedChunks.size()
+            );
+        }
 
         validateIndexableDocument(loadDocument(documentId), document.contentSha256(), true);
         cleanupObsoleteGenerations(documentId, indexGeneration, currentMaxChunkIndex, milvusVectorIndexer);
@@ -672,7 +681,12 @@ public class RagIndexingService {
             milvusVectorIndexer.delete(normalizedVectorIds);
             return;
         }
-        throw new MilvusClientException(ErrorCode.CLIENT_ERROR,
+        if (!ragProperties.milvus().enabled()) {
+            log.debug("Milvus disabled, skipping vector delete: phase={}, vectorCount={}", phase, normalizedVectorIds.size());
+            return;
+        }
+        throw new MilvusClientException(
+                ErrorCode.CLIENT_ERROR,
                 "Milvus 向量删除器未装配，无法执行向量删除: phase=" + phase + ", vectorCount=" + normalizedVectorIds.size()
         );
     }
@@ -709,7 +723,7 @@ public class RagIndexingService {
 
     private RagMilvusVectorIndexer currentMilvusVectorIndexer() {
         if (!ragProperties.milvus().enabled()) {
-            throw new IllegalStateException("当前索引流程要求启用 Milvus，但 rag.milvus.enabled=false");
+            return null;
         }
         RagMilvusVectorIndexer indexer = milvusVectorIndexerProvider.getIfAvailable();
         if (indexer == null) {
@@ -725,10 +739,12 @@ public class RagIndexingService {
     ) {
         log.info("RAG document index cleanup started: documentId={}", documentId);
 
-        // 1. 优先使用 Milvus 原生表达式删除（最安全、最彻底）
-        milvusVectorIndexer.deleteByDocumentId(documentId);
-        log.debug("Milvus vectors deleted by expression for documentId={}", documentId);
-        // 3. 最后无脑清理本地 Chunk 记录（无论前两步发生什么，都不影响这里）
+        if (milvusVectorIndexer != null) {
+            milvusVectorIndexer.deleteByDocumentId(documentId);
+            log.debug("Milvus vectors deleted by expression for documentId={}", documentId);
+        } else {
+            log.debug("Milvus disabled, skipping vector cleanup for documentId={}", documentId);
+        }
         chunkRepository.deleteByDocumentId(documentId);
         log.atInfo()
                 .addKeyValue(RagLogFields.EVENT_NAME, "rag.index.deleted")

@@ -35,7 +35,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
-public class RagConversationService {
+public class RagConversationService implements com.bytedance.ai.retrieval.spi.AgentConversationSpi {
 
     private static final int HISTORY_LIMIT = 10;
     private static final int DEFAULT_PAGE_LIMIT = 20;
@@ -203,6 +203,98 @@ public class RagConversationService {
                 notices
         );
     }
+
+    // -------- AgentConversationSpi（agent 模块走的子集，不触碰 rag_ask_runs） --------
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public com.bytedance.ai.retrieval.spi.AgentTurnConversationState beginTurn(
+            String userId,
+            String conversationId,
+            String userMessage,
+            String correlationId
+    ) {
+        requireText(userId, "userId 不能为空");
+        requireText(conversationId, "conversationId 不能为空");
+        requireText(userMessage, "用户消息不能为空");
+        userRepository.upsertSeen(userId);
+        RagConversationRecord conversation = requireOwnedConversation(userId, conversationId, true);
+        conversationRepository.lockById(conversation.id());
+
+        RagConversationMessageRecord userMessageRecord = messageRepository.append(
+                conversation.id(),
+                "user",
+                userMessage,
+                "SUCCEEDED",
+                correlationId
+        );
+        List<com.bytedance.ai.retrieval.spi.AgentTurnConversationState.ConversationTurn> history = messageRepository
+                .findRecentByConversationId(conversation.id(), HISTORY_LIMIT + 1)
+                .stream()
+                .filter(message -> !message.id().equals(userMessageRecord.id()))
+                .filter(message -> "SUCCEEDED".equals(message.status()))
+                .limit(HISTORY_LIMIT)
+                .map(message -> new com.bytedance.ai.retrieval.spi.AgentTurnConversationState.ConversationTurn(
+                        message.role(),
+                        message.content()
+                ))
+                .toList();
+        RagConversationMessageRecord assistantMessageRecord = messageRepository.append(
+                conversation.id(),
+                "assistant",
+                "",
+                "STREAMING",
+                correlationId
+        );
+        conversationRepository.refreshStats(conversation.id());
+        return new com.bytedance.ai.retrieval.spi.AgentTurnConversationState(
+                conversation.id(),
+                String.valueOf(userMessageRecord.id()),
+                String.valueOf(assistantMessageRecord.id()),
+                history
+        );
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void completeTurn(String assistantMessageId, String answerText) {
+        requireText(assistantMessageId, "assistantMessageId 不能为空");
+        Long messageId = parseMessageId(assistantMessageId);
+        RagConversationMessageRecord updated = messageRepository.updateContentAndStatus(
+                messageId,
+                answerText == null ? "" : answerText,
+                "SUCCEEDED"
+        );
+        conversationRepository.refreshStats(updated.conversationId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void failTurn(String assistantMessageId, String errorCode, String errorMessage) {
+        requireText(assistantMessageId, "assistantMessageId 不能为空");
+        Long messageId = parseMessageId(assistantMessageId);
+        RagConversationMessageRecord existing = messageRepository.findById(messageId);
+        String content = StringUtils.hasText(existing.content())
+                ? existing.content()
+                : ASK_FAILED_MESSAGE_PREFIX
+                        + (StringUtils.hasText(errorMessage) ? errorMessage : errorCode);
+        RagConversationMessageRecord updated = messageRepository.updateContentAndStatus(
+                messageId,
+                content,
+                "FAILED"
+        );
+        conversationRepository.refreshStats(updated.conversationId());
+    }
+
+    private Long parseMessageId(String assistantMessageId) {
+        try {
+            return Long.parseLong(assistantMessageId);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("非法的 assistantMessageId: " + assistantMessageId, exception);
+        }
+    }
+
+    // -------- 既有 ask 链路（保持不变） --------
 
     @Transactional(readOnly = true)
     public List<RagStaleAskRunRecord> findStaleRunningAsks(OffsetDateTime startedBefore, int limit) {

@@ -21,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @ApplicationModuleTest(
         module = "document",
-        extraIncludes = "rag.infrastructure",
+        extraIncludes = "infrastructure",
         webEnvironment = SpringBootTest.WebEnvironment.NONE
 )
 @ActiveProfiles("test")

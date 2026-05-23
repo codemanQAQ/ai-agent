@@ -18,7 +18,6 @@ import org.springframework.ai.vectorstore.milvus.MilvusVectorStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.slf4j.Logger;
@@ -31,13 +30,12 @@ import java.util.concurrent.TimeUnit;
  * RAG 模块基础配置。
  *
  * <p>当前主要负责两件事：
- * 1. 注册 {@link RagProperties} 配置属性，供整个 RAG 模块注入使用。
+ * 1. 输出关键配置与模型绑定日志，便于启动期排障。
  * 2. 在显式启用 Milvus 时，装配向量存储所需的基础 Bean。
  *
  * <p>这里保留的是 RAG 模块自管的最小装配逻辑，而不是把所有外部组件都集中堆在一个配置类里。
  */
 @Configuration
-@EnableConfigurationProperties({RagProperties.class})
 public class RagConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(RagConfiguration.class);

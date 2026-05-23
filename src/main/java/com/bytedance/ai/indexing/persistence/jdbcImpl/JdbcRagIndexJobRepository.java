@@ -8,6 +8,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -50,47 +52,28 @@ public class JdbcRagIndexJobRepository implements RagIndexJobRepository {
 
     @Override
     public void queue(Long documentId, String contentSha256) {
-        // 利用 PG 的 ON CONFLICT 语法，一条 SQL 搞定并发写入，无惧主键冲突！
-        jdbc.update(
-                """
-                        INSERT INTO rag_index_jobs (
-                            document_id, content_sha256, status, stage
-                        ) VALUES (?, ?, ?, ?)
-                        ON CONFLICT (document_id, content_sha256) -- 这里必须是你的联合唯一索引
-                        DO UPDATE SET
-                            status = EXCLUDED.status,
-                            stage = EXCLUDED.stage,
-                            attempt_count = 0,
-                            target_generation = NULL,
-                            message_id = NULL,
-                            last_error = NULL,
-                            started_at = NULL,
-                            finished_at = NULL,
-                            updated_at = now()
-                        """,
-                documentId,
-                contentSha256,
-                RagIndexJobStatus.QUEUED.name(),
-                RagIndexStage.QUEUED.name()
-        );
+        jdbc.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement(queueSql(connection));
+            statement.setLong(1, documentId);
+            statement.setString(2, contentSha256);
+            statement.setString(3, RagIndexJobStatus.QUEUED.name());
+            statement.setString(4, RagIndexStage.QUEUED.name());
+            return statement;
+        });
     }
 
     @Override
     public void attachMessageId(Long documentId, String contentSha256, String messageId) {
-        jdbc.update(
-                """
-                        INSERT INTO rag_index_jobs (
-                            document_id, content_sha256, status, stage, message_id
-                        ) VALUES (?, ?, 'QUEUED', 'QUEUED', ?)
-                        ON CONFLICT (document_id, content_sha256)
-                        DO UPDATE SET
-                            message_id = EXCLUDED.message_id,
-                            updated_at = now()
-                        """,
-                documentId,
-                contentSha256,
-                messageId
-        );
+        jdbc.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement(attachMessageIdSql(connection));
+            statement.setLong(1, documentId);
+            statement.setString(2, contentSha256);
+            statement.setString(3, messageId);
+            if (isPostgreSql(connection)) {
+                statement.setString(4, messageId);
+            }
+            return statement;
+        });
     }
 
     @Override
@@ -254,5 +237,58 @@ public class JdbcRagIndexJobRepository implements RagIndexJobRepository {
                 contentSha256,
                 fromStage.name()
         );
+    }
+
+    private String queueSql(Connection connection) throws java.sql.SQLException {
+        if (isPostgreSql(connection)) {
+            // Production PostgreSQL keeps the single-statement upsert for concurrent dispatch.
+            return """
+                    INSERT INTO rag_index_jobs (
+                        document_id, content_sha256, status, stage
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT (document_id, content_sha256)
+                    DO UPDATE SET
+                        status = EXCLUDED.status,
+                        stage = EXCLUDED.stage,
+                        attempt_count = 0,
+                        target_generation = NULL,
+                        message_id = NULL,
+                        last_error = NULL,
+                        started_at = NULL,
+                        finished_at = NULL,
+                        updated_at = now()
+                    """;
+        }
+        return """
+                MERGE INTO rag_index_jobs (
+                    document_id, content_sha256, status, stage, attempt_count,
+                    target_generation, message_id, last_error, started_at, finished_at, updated_at
+                ) KEY (document_id, content_sha256)
+                VALUES (?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP)
+                """;
+    }
+
+    private String attachMessageIdSql(Connection connection) throws java.sql.SQLException {
+        if (isPostgreSql(connection)) {
+            return """
+                    INSERT INTO rag_index_jobs (
+                        document_id, content_sha256, status, stage, message_id
+                    ) VALUES (?, ?, 'QUEUED', 'QUEUED', ?)
+                    ON CONFLICT (document_id, content_sha256)
+                    DO UPDATE SET
+                        message_id = ?,
+                        updated_at = now()
+                    """;
+        }
+        return """
+                MERGE INTO rag_index_jobs (
+                    document_id, content_sha256, status, stage, message_id, updated_at
+                ) KEY (document_id, content_sha256)
+                VALUES (?, ?, 'QUEUED', 'QUEUED', ?, CURRENT_TIMESTAMP)
+                """;
+    }
+
+    private boolean isPostgreSql(Connection connection) throws java.sql.SQLException {
+        return connection.getMetaData().getDatabaseProductName().toLowerCase().contains("postgresql");
     }
 }
