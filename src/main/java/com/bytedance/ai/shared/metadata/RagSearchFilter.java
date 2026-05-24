@@ -6,31 +6,94 @@ import org.springframework.util.StringUtils;
 /**
  * 检索过滤条件。
  *
- * @param sourceUriPrefix 文档来源 URI 的前缀匹配条件
- * @param tags 文档标签过滤条件
+ * @param sourceUriPrefix     文档来源 URI 的前缀匹配条件
+ * @param tags                文档标签过滤条件（"且"：全部命中才召回）
  * @param headingPathContains 标题路径的包含匹配条件
+ * @param mustNotTags         反选标签：命中其一即剔除（W2 反选加分项）
+ * @param mustNotBrands       反选品牌：metadata.brand 命中即剔除
+ * @param mustNotIngredients  反选成分 / 材质：在 chunk content 中出现即剔除（粗过滤，精过滤交给 NegationRerankFilter）
  */
 public record RagSearchFilter(
         String sourceUriPrefix,
         List<String> tags,
-        String headingPathContains
+        String headingPathContains,
+        List<String> mustNotTags,
+        List<String> mustNotBrands,
+        List<String> mustNotIngredients
 ) {
+
+    public RagSearchFilter {
+        tags = copyOrEmpty(tags);
+        mustNotTags = copyOrEmpty(mustNotTags);
+        mustNotBrands = copyOrEmpty(mustNotBrands);
+        mustNotIngredients = copyOrEmpty(mustNotIngredients);
+    }
 
     public static RagSearchFilter of(String sourceUriPrefix, List<String> tags, String headingPathContains) {
         return new RagSearchFilter(
                 trimToNull(sourceUriPrefix),
-                tags == null ? List.of() : tags.stream()
-                        .filter(StringUtils::hasText)
-                        .map(String::trim)
-                        .toList(),
-                trimToNull(headingPathContains)
+                tags,
+                trimToNull(headingPathContains),
+                List.of(),
+                List.of(),
+                List.of()
+        );
+    }
+
+    public static RagSearchFilter of(
+            String sourceUriPrefix,
+            List<String> tags,
+            String headingPathContains,
+            List<String> mustNotTags,
+            List<String> mustNotBrands,
+            List<String> mustNotIngredients
+    ) {
+        return new RagSearchFilter(
+                trimToNull(sourceUriPrefix),
+                tags,
+                trimToNull(headingPathContains),
+                mustNotTags,
+                mustNotBrands,
+                mustNotIngredients
+        );
+    }
+
+    public RagSearchFilter withMustNot(
+            List<String> mustNotTags,
+            List<String> mustNotBrands,
+            List<String> mustNotIngredients
+    ) {
+        return new RagSearchFilter(
+                this.sourceUriPrefix,
+                this.tags,
+                this.headingPathContains,
+                mustNotTags,
+                mustNotBrands,
+                mustNotIngredients
         );
     }
 
     public boolean isEmpty() {
         return !StringUtils.hasText(sourceUriPrefix)
-                && (tags == null || tags.isEmpty())
-                && !StringUtils.hasText(headingPathContains);
+                && tags.isEmpty()
+                && !StringUtils.hasText(headingPathContains)
+                && mustNotTags.isEmpty()
+                && mustNotBrands.isEmpty()
+                && mustNotIngredients.isEmpty();
+    }
+
+    public boolean hasMustNot() {
+        return !mustNotTags.isEmpty() || !mustNotBrands.isEmpty() || !mustNotIngredients.isEmpty();
+    }
+
+    private static List<String> copyOrEmpty(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .toList();
     }
 
     private static String trimToNull(String value) {

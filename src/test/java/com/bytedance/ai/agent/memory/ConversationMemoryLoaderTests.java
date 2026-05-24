@@ -26,7 +26,7 @@ class ConversationMemoryLoaderTests {
     void loadsHistorySummaryAndLastTurnSpuRefs() {
         StubRepo repo = new StubRepo();
         repo.appendSucceeded("turn-1", "c1", "FILTER_BY_ATTR",
-                "{\"must\":[\"轻便\"],\"brands\":[],\"mustNot\":[]}",
+                "{\"must\":[\"轻便\"],\"brands\":[],\"mustNot\":{\"tags\":[],\"brands\":[],\"ingredients\":[]}}",
                 "[{\"refId\":\"#1\",\"externalRef\":\"SPU-9\"},{\"refId\":\"#2\",\"externalRef\":\"SPU-7\"}]");
         ConversationMemoryLoader loader = new ConversationMemoryLoader(new AgentTurnPersistenceService(repo, jsonCodec), jsonCodec);
 

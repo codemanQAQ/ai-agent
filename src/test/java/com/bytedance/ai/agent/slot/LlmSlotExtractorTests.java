@@ -63,7 +63,7 @@ class LlmSlotExtractorTests {
         assertThat(slot.priceRange()).isEqualTo(new Slot.PriceRange(new BigDecimal("100.0"), new BigDecimal("300.0")));
         assertThat(slot.categoryHint()).isEqualTo("箱包");
         assertThat(slot.brands()).containsExactly("Acme");
-        assertThat(slot.mustNot()).isEmpty();
+        assertThat(slot.mustNot().isEmpty()).isTrue();
         assertThat(slot.scenario()).isNull();
     }
 

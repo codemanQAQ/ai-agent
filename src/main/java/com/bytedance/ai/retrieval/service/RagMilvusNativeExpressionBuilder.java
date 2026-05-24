@@ -10,6 +10,14 @@ import org.springframework.util.StringUtils;
 
 /**
  * 将可下推的检索过滤条件编译为 Milvus 原生过滤表达式。
+ *
+ * <p>W2 起追加反选支持：
+ * <ul>
+ *   <li>{@code mustNotTags}：{@code !json_contains_any(metadata["documentTags"], [...])}</li>
+ *   <li>{@code mustNotBrands}：{@code metadata["brand"] not in [...]}</li>
+ *   <li>{@code mustNotIngredients}：{@code !(metadata["content"] LIKE "%X%")}（在召回侧粗过滤，
+ *       命中精度交给 NegationRerankFilter 兜底）</li>
+ * </ul>
  */
 @Component
 public class RagMilvusNativeExpressionBuilder {
@@ -45,8 +53,30 @@ public class RagMilvusNativeExpressionBuilder {
                     + escapeLikeLiteral(normalizeLowerCase(filter.headingPathContains()))
                     + "%\"");
         }
+        if (!filter.mustNotTags().isEmpty()) {
+            expressions.add("not json_contains_any("
+                    + MilvusVectorStore.METADATA_FIELD_NAME
+                    + "[\"documentTags\"], "
+                    + toJsonArray(filter.mustNotTags())
+                    + ")");
+        }
+        if (!filter.mustNotBrands().isEmpty()) {
+            expressions.add(MilvusVectorStore.METADATA_FIELD_NAME
+                    + "[\"brand\"] not in "
+                    + toJsonArray(filter.mustNotBrands()));
+        }
+        if (!filter.mustNotIngredients().isEmpty()) {
+            // chunk 正文 LIKE 的负向过滤；每个成分一条 NOT LIKE，AND 串联。
+            for (String ingredient : filter.mustNotIngredients()) {
+                expressions.add("not "
+                        + MilvusVectorStore.METADATA_FIELD_NAME
+                        + "[\"contentSummary\"] LIKE \"%"
+                        + escapeLikeLiteral(ingredient)
+                        + "%\"");
+            }
+        }
 
-        if (!StringUtils.hasText(expressions.isEmpty() ? null : expressions.getFirst())) {
+        if (expressions.isEmpty()) {
             return null;
         }
         return String.join(" AND ", expressions);

@@ -68,6 +68,34 @@ public class RagChunkMetadataHelper {
             }
         }
 
+        if (!filter.mustNotTags().isEmpty()) {
+            List<String> lowerCaseTags = metadataView.documentTags().stream()
+                    .map(this::normalizeLowerCase)
+                    .toList();
+            boolean hitForbidden = filter.mustNotTags().stream()
+                    .map(this::normalizeLowerCase)
+                    .anyMatch(lowerCaseTags::contains);
+            if (hitForbidden) {
+                return false;
+            }
+        }
+
+        if (!filter.mustNotBrands().isEmpty()) {
+            Object brand = metadataView.raw().get("brand");
+            if (brand != null) {
+                String brandText = normalizeLowerCase(String.valueOf(brand));
+                boolean blocked = filter.mustNotBrands().stream()
+                        .map(this::normalizeLowerCase)
+                        .anyMatch(brandText::equals);
+                if (blocked) {
+                    return false;
+                }
+            }
+        }
+
+        // mustNotIngredients 在召回阶段不查 chunk content（这里 metadata 不一定带正文），
+        // 交给 NegationRerankFilter 在拿到 hit.snippet / SPU description 后做精过滤。
+
         return true;
     }
 
