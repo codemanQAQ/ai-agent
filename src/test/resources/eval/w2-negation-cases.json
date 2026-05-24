@@ -1,0 +1,77 @@
+{
+  "datasetVersion": "w2-negation-2026-05",
+  "description": "W2 反选加分项验收用例：5 条覆盖 ingredient / brand / tag 三类反选。期望命中由 sample-catalog.json 推导。EvalRunner 在召回后会断言 (a) excludedFacets 非空且包含期望关键词；(b) expectedKeep 的 SPU 出现在 top-5；(c) expectedDrop 的 SPU 不在 top-5。",
+  "catalogFixture": "src/test/resources/sample-catalog.json",
+  "cases": [
+    {
+      "id": "neg-01",
+      "category": "negation_ingredient",
+      "intent": "FILTER_BY_ATTR",
+      "query": "推荐防晒霜不含酒精",
+      "expectedSlotMustNot": {
+        "ingredients": ["酒精"]
+      },
+      "expectedExcludedFacetsContains": ["酒精"],
+      "expectedKeepSpuRefs": ["SPU-0009"],
+      "expectedDropSpuRefs": [],
+      "notes": "Anessa 纯物理防晒霜标题明确「不含酒精」，应留下并成为 #1"
+    },
+    {
+      "id": "neg-02",
+      "category": "negation_brand",
+      "intent": "FILTER_BY_ATTR",
+      "query": "买款主动降噪蓝牙耳机，非苹果品牌",
+      "expectedSlotMustNot": {
+        "brands": ["Apple", "苹果"]
+      },
+      "expectedExcludedFacetsContains": ["苹果"],
+      "expectedKeepSpuRefs": ["SPU-0005"],
+      "expectedDropSpuRefs": [],
+      "notes": "Sony TWS 应在 top；catalog 内即使没有 Apple SKU，excludedFacets 也应回放 brand=苹果，让客户端展示「已为您排除：苹果」"
+    },
+    {
+      "id": "neg-03",
+      "category": "negation_ingredient_combo",
+      "intent": "FILTER_BY_ATTR",
+      "query": "敏感肌面霜，不要香精和酒精",
+      "expectedSlotMustNot": {
+        "ingredients": ["香精", "酒精"]
+      },
+      "expectedExcludedFacetsContains": ["香精", "酒精"],
+      "expectedKeepSpuRefs": [],
+      "expectedDropSpuRefs": [],
+      "notes": "并列两条 ingredient；NegationSlotExtractor 必须分桶为两条，不能合成一个字符串"
+    },
+    {
+      "id": "neg-04",
+      "category": "negation_tag_color",
+      "intent": "FILTER_BY_ATTR",
+      "query": "双肩包不要黑色",
+      "expectedSlotMustNot": {
+        "tags": ["黑色"]
+      },
+      "expectedExcludedFacetsContains": ["黑色"],
+      "expectedKeepSpuRefs": ["SPU-0001"],
+      "expectedDropSpuRefs": [],
+      "notes": "无 ingredient/brand 词库命中，应落到 tags 桶；SPU-0001 默认不是黑色应留下"
+    },
+    {
+      "id": "neg-05",
+      "category": "negation_ingredient_arch",
+      "intent": "FILTER_BY_ATTR",
+      "query": "买轻薄笔记本，不要 ARM 芯片",
+      "expectedSlotMustNot": {
+        "ingredients": ["ARM"]
+      },
+      "expectedExcludedFacetsContains": ["ARM"],
+      "expectedKeepSpuRefs": ["SPU-0007"],
+      "expectedDropSpuRefs": [],
+      "notes": "演示成分/材质语义其实也覆盖芯片架构；SPU-0007 X86 轻薄本应保留"
+    }
+  ],
+  "metricsAtTopK": {
+    "negationPrecisionAt5Target": 0.80,
+    "excludedFacetsCoverageTarget": 0.90,
+    "notes": "W2 反选加分项的量化目标，留给 W2 EvalRunner 跑分使用"
+  }
+}
