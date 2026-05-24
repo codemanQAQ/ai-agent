@@ -55,6 +55,17 @@ public class AgentSseEventFactory {
             String toolName,
             List<SpuCardView> cards,
             Map<String, Object> facetsApplied,
+            List<String> excludedFacets
+    ) {
+        return event("tool.result", correlationId,
+                new ToolResultPayload(toolName, cards, facetsApplied, null, excludedFacets));
+    }
+
+    public AgentStreamEvent toolResult(
+            String correlationId,
+            String toolName,
+            List<SpuCardView> cards,
+            Map<String, Object> facetsApplied,
             CompareMatrixView compareMatrix
     ) {
         return event("tool.result", correlationId, new ToolResultPayload(toolName, cards, facetsApplied, compareMatrix));

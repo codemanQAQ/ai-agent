@@ -18,6 +18,7 @@ import com.bytedance.ai.agent.memory.ConversationSummarizer;
 import com.bytedance.ai.agent.memory.ConversationSummary;
 import com.bytedance.ai.agent.persistence.AgentTurnPersistenceService;
 import com.bytedance.ai.agent.persistence.AgentTurnRecord;
+import com.bytedance.ai.agent.slot.NegationSlotExtractor;
 import com.bytedance.ai.agent.slot.SlotExtractor;
 import com.bytedance.ai.agent.tool.AgentToolCallback;
 import com.bytedance.ai.agent.tool.ToolRegistry;
@@ -58,6 +59,7 @@ public class AgentTurnService implements AgentTurnFacade {
     private final ConversationSummarizer conversationSummarizer;
     private final IntentClassifier intentClassifier;
     private final SlotExtractor slotExtractor;
+    private final NegationSlotExtractor negationSlotExtractor;
     private final ToolRegistry toolRegistry;
     private final AgentAnswerGenerator answerGenerator;
     private final CitationExtractor citationExtractor;
@@ -72,6 +74,7 @@ public class AgentTurnService implements AgentTurnFacade {
             ConversationSummarizer conversationSummarizer,
             IntentClassifier intentClassifier,
             SlotExtractor slotExtractor,
+            NegationSlotExtractor negationSlotExtractor,
             ToolRegistry toolRegistry,
             AgentAnswerGenerator answerGenerator,
             CitationExtractor citationExtractor,
@@ -85,6 +88,7 @@ public class AgentTurnService implements AgentTurnFacade {
         this.conversationSummarizer = conversationSummarizer;
         this.intentClassifier = intentClassifier;
         this.slotExtractor = slotExtractor;
+        this.negationSlotExtractor = negationSlotExtractor;
         this.toolRegistry = toolRegistry;
         this.answerGenerator = answerGenerator;
         this.citationExtractor = citationExtractor;
@@ -141,6 +145,13 @@ public class AgentTurnService implements AgentTurnFacade {
 
             IntentClassification classification = intentClassifier.classify(request.message(), memory);
             Slot slots = slotExtractor.extract(request.message(), classification.intent(), memory);
+            // 反选语义独立抽取后并入 slot.mustNot；OOS 跳过。
+            if (classification.intent() != IntentType.OUT_OF_SCOPE) {
+                Slot.MustNot negation = negationSlotExtractor.extract(request.message());
+                if (!negation.isEmpty()) {
+                    slots = slots.withMustNot(slots.mustNot().merge(negation));
+                }
+            }
             persistenceService.recordIntent(
                     state.turnId,
                     classification.intent().name(),
@@ -249,7 +260,8 @@ public class AgentTurnService implements AgentTurnFacade {
                         state.correlationId,
                         output.toolName(),
                         output.cards(),
-                        output.facetsApplied()
+                        output.facetsApplied(),
+                        output.excludedFacets()
                 ));
             } else if (callback instanceof CompareProductsToolCallback compareProductsTool) {
                 CompareProductsToolCallback.CompareProductsOutput output = compareProductsTool.compare(

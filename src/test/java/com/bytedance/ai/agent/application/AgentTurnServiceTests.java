@@ -147,9 +147,14 @@ class AgentTurnServiceTests {
         SlotExtractor slotExtractor = (ignored, intent, memory) -> intent == IntentType.FILTER_BY_ATTR
                 ? new Slot(List.of("轻便"), List.of(), new Slot.PriceRange(null, new BigDecimal("300")), "箱包", List.of(), null)
                 : Slot.empty();
+        com.bytedance.ai.agent.slot.NegationRerankFilter negationRerankFilter =
+                new com.bytedance.ai.agent.slot.NegationRerankFilter(noChatModel(), jsonCodec);
+        com.bytedance.ai.agent.slot.NegationSlotExtractor negationSlotExtractor =
+                new com.bytedance.ai.agent.slot.NegationSlotExtractor(noChatModel(), jsonCodec);
         SearchProductsToolCallback searchProductsTool = new SearchProductsToolCallback(
                 new StubProductSearchSpi(),
                 new StubCatalogQueryFacade(),
+                negationRerankFilter,
                 jsonCodec
         );
         CompareProductsToolCallback compareProductsTool = new CompareProductsToolCallback(
@@ -166,6 +171,7 @@ class AgentTurnServiceTests {
                 new ConversationSummarizer(noChatModel()),
                 new com.bytedance.ai.agent.intent.RuleBasedIntentClassifier(),
                 slotExtractor,
+                negationSlotExtractor,
                 new ToolRegistry(List.of(searchProductsTool, compareProductsTool)),
                 new AgentAnswerGenerator(noChatModel(), new ClassPathResource("prompts/agent-answer-v1.txt")),
                 new CitationExtractor(),

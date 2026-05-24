@@ -3,6 +3,7 @@ package com.bytedance.ai.agent.tool.impl;
 import com.bytedance.ai.agent.api.IntentType;
 import com.bytedance.ai.agent.api.Slot;
 import com.bytedance.ai.agent.api.SpuCardView;
+import com.bytedance.ai.agent.slot.NegationRerankFilter;
 import com.bytedance.ai.agent.tool.AgentToolCallback;
 import com.bytedance.ai.catalog.api.CatalogQueryFacade;
 import com.bytedance.ai.catalog.api.CatalogSpuView;
@@ -27,14 +28,17 @@ public class SearchProductsToolCallback implements AgentToolCallback {
 
     public static final String TOOL_NAME = "search_products";
     private static final int DEFAULT_TOP_K = 10;
+    /** 反选场景先多召回，再 rerank 剔假阳；避免 mustNot 把候选集压得太薄。 */
+    private static final int RECALL_TOP_K_FOR_NEGATION = 50;
     private static final String INPUT_SCHEMA = """
             {
               "type":"object",
               "properties":{
                 "query":{"type":"string","description":"用户商品检索查询"},
-                "slots":{"type":"object","description":"Agent 已抽取的结构化槽位"},
+                "slots":{"type":"object","description":"Agent 已抽取的结构化槽位（含 mustNot）"},
                 "topK":{"type":"integer","minimum":1,"maximum":10},
-                "includeChunkTypes":{"type":"array","items":{"type":"string"}}
+                "includeChunkTypes":{"type":"array","items":{"type":"string"}},
+                "restrictToSpuRefs":{"type":"array","items":{"type":"string"}}
               },
               "required":["query"]
             }
@@ -42,15 +46,18 @@ public class SearchProductsToolCallback implements AgentToolCallback {
 
     private final ProductSearchSpi productSearchSpi;
     private final CatalogQueryFacade catalogQueryFacade;
+    private final NegationRerankFilter negationRerankFilter;
     private final RagJsonCodec jsonCodec;
 
     public SearchProductsToolCallback(
             ProductSearchSpi productSearchSpi,
             CatalogQueryFacade catalogQueryFacade,
+            NegationRerankFilter negationRerankFilter,
             RagJsonCodec jsonCodec
     ) {
         this.productSearchSpi = productSearchSpi;
         this.catalogQueryFacade = catalogQueryFacade;
+        this.negationRerankFilter = negationRerankFilter;
         this.jsonCodec = jsonCodec;
     }
 
@@ -58,7 +65,7 @@ public class SearchProductsToolCallback implements AgentToolCallback {
     public ToolDefinition getToolDefinition() {
         return ToolDefinition.builder()
                 .name(TOOL_NAME)
-                .description("基于关键词、价格区间、类目等在电商商品库内检索")
+                .description("基于关键词、价格区间、类目、反选属性等在电商商品库内检索")
                 .inputSchema(INPUT_SCHEMA)
                 .build();
     }
@@ -73,9 +80,21 @@ public class SearchProductsToolCallback implements AgentToolCallback {
         if (input == null || !StringUtils.hasText(input.query())) {
             throw new IllegalArgumentException("search_products.query 不能为空");
         }
-        List<ProductSearchHit> hits = productSearchSpi.search(toRequest(input));
+        Slot.MustNot mustNot = mustNotOf(input.slots());
+        List<ProductSearchHit> hits = productSearchSpi.search(toRequest(input, mustNot));
+        List<String> excludedFacets = List.of();
+        if (!mustNot.isEmpty() && !hits.isEmpty()) {
+            NegationRerankFilter.Result reranked = negationRerankFilter.apply(hits, mustNot);
+            hits = reranked.keepHits();
+            excludedFacets = reranked.excludedFacets();
+        }
+        // 截到对外的 topK；rerank 之前用 recall 大池子。
+        int finalTopK = effectiveTopK(input.topK());
+        if (hits.size() > finalTopK) {
+            hits = hits.subList(0, finalTopK);
+        }
         List<SpuCardView> cards = enrichWithCatalog(hits);
-        return new SearchProductsOutput(TOOL_NAME, cards, facetsApplied(input.slots()));
+        return new SearchProductsOutput(TOOL_NAME, cards, facetsApplied(input.slots()), excludedFacets);
     }
 
     @Override
@@ -83,14 +102,29 @@ public class SearchProductsToolCallback implements AgentToolCallback {
         return Set.of(IntentType.RECOMMEND_VAGUE, IntentType.FILTER_BY_ATTR, IntentType.REFINE);
     }
 
-    private ProductSearchRequest toRequest(SearchProductsInput input) {
+    private ProductSearchRequest toRequest(SearchProductsInput input, Slot.MustNot mustNot) {
         return new ProductSearchRequest(
                 buildQuery(input),
-                RagSearchFilter.of("catalog://spu/", null, input.slots() == null ? null : input.slots().categoryHint()),
-                effectiveTopK(input.topK()),
+                RagSearchFilter.of(
+                        "catalog://spu/",
+                        null,
+                        input.slots() == null ? null : input.slots().categoryHint(),
+                        mustNot.tags(),
+                        mustNot.brands(),
+                        mustNot.ingredients()
+                ),
+                // 反选场景多召回一些，给 rerank 留余量。
+                mustNot.isEmpty() ? effectiveTopK(input.topK()) : RECALL_TOP_K_FOR_NEGATION,
                 input.includeChunkTypes() == null ? List.of() : input.includeChunkTypes(),
                 input.restrictToSpuRefs() == null ? List.of() : input.restrictToSpuRefs()
         );
+    }
+
+    private Slot.MustNot mustNotOf(Slot slot) {
+        if (slot == null || slot.mustNot() == null) {
+            return Slot.MustNot.empty();
+        }
+        return slot.mustNot();
     }
 
     private String buildQuery(SearchProductsInput input) {
@@ -198,6 +232,13 @@ public class SearchProductsToolCallback implements AgentToolCallback {
         if (!slot.must().isEmpty()) {
             facets.put("must", slot.must());
         }
+        if (!slot.mustNot().isEmpty()) {
+            Map<String, Object> mn = new LinkedHashMap<>();
+            if (!slot.mustNot().tags().isEmpty()) mn.put("tags", slot.mustNot().tags());
+            if (!slot.mustNot().brands().isEmpty()) mn.put("brands", slot.mustNot().brands());
+            if (!slot.mustNot().ingredients().isEmpty()) mn.put("ingredients", slot.mustNot().ingredients());
+            facets.put("mustNot", mn);
+        }
         return facets;
     }
 
@@ -216,11 +257,17 @@ public class SearchProductsToolCallback implements AgentToolCallback {
     public record SearchProductsOutput(
             String toolName,
             List<SpuCardView> cards,
-            Map<String, Object> facetsApplied
+            Map<String, Object> facetsApplied,
+            List<String> excludedFacets
     ) {
         public SearchProductsOutput {
             cards = cards == null ? List.of() : List.copyOf(cards);
             facetsApplied = facetsApplied == null ? Map.of() : Map.copyOf(facetsApplied);
+            excludedFacets = excludedFacets == null ? List.of() : List.copyOf(excludedFacets);
+        }
+
+        public SearchProductsOutput(String toolName, List<SpuCardView> cards, Map<String, Object> facetsApplied) {
+            this(toolName, cards, facetsApplied, List.of());
         }
     }
 }

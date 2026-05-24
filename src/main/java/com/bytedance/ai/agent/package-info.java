@@ -11,7 +11,7 @@
                 "shared",
                 "catalog::api",
                 "retrieval::api",
-                "retrieval::spi"
+                "retrieval::spi",
         }
 )
 package com.bytedance.ai.agent;

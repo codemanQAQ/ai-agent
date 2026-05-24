@@ -27,11 +27,23 @@ class SearchProductsToolCallbackTests {
     private final RagJsonCodec jsonCodec = new RagJsonCodec(JsonMapper.builder().build());
     private final CapturingProductSearchSpi productSearchSpi = new CapturingProductSearchSpi();
     private final StubCatalogQueryFacade catalogQueryFacade = new StubCatalogQueryFacade();
+    private final com.bytedance.ai.agent.slot.NegationRerankFilter negationRerankFilter =
+            new com.bytedance.ai.agent.slot.NegationRerankFilter(noChatModel(), jsonCodec);
     private final SearchProductsToolCallback callback = new SearchProductsToolCallback(
             productSearchSpi,
             catalogQueryFacade,
+            negationRerankFilter,
             jsonCodec
     );
+
+    private static org.springframework.beans.factory.ObjectProvider<org.springframework.ai.chat.model.ChatModel> noChatModel() {
+        return new org.springframework.beans.factory.ObjectProvider<>() {
+            @Override public org.springframework.ai.chat.model.ChatModel getObject(Object... args) { return null; }
+            @Override public org.springframework.ai.chat.model.ChatModel getIfAvailable() { return null; }
+            @Override public org.springframework.ai.chat.model.ChatModel getIfUnique() { return null; }
+            @Override public org.springframework.ai.chat.model.ChatModel getObject() { return null; }
+        };
+    }
 
     @Test
     void exposesSpringAiToolDefinitionAndHandledIntents() {
