@@ -1,11 +1,11 @@
 package com.bytedance.ai.retrieval.spi;
 
 /**
- * 给 agent 编排链路用的会话操作 SPI。
+ * 给 graph 编排链路用的会话操作 SPI。
  *
  * <p>本 SPI 只覆盖 {@code rag_conversations} + {@code rag_conversation_messages}
  * 的会话/消息一对生命周期，**不**触碰 {@code rag_ask_runs}——后者属于既有 ask 链路。
- * agent 自有的 {@code agent_turn} 表在 agent 模块自己维护，幂等也由它负责。
+ * {@code agent_turn} 表由 graph 会话仓储维护，幂等也由它负责。
  *
  * <p>调用顺序：
  * <ol>
@@ -18,7 +18,7 @@ package com.bytedance.ai.retrieval.spi;
 public interface AgentConversationSpi {
 
     /**
-     * 开启一轮 agent 会话。
+     * 开启一轮 graph 会话。
      *
      * <p>调用方需保证已在 agent_turn 表完成幂等检查；命中历史时不应进入本方法。
      *

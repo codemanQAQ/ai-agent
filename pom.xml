@@ -18,7 +18,7 @@
         <java.version>25</java.version>
         <maven.compiler.release>25</maven.compiler.release>
         <org.mapstruct.version>1.6.3</org.mapstruct.version>
-        <spring-ai.version>2.0.0-M6</spring-ai.version>
+        <spring-ai.version>2.0.0-M4</spring-ai.version>
         <grpc.version>1.79.0</grpc.version>
         <spring-statemachine.version>4.0.1</spring-statemachine.version>
         <spring-modulith.version>2.0.5</spring-modulith.version>
@@ -125,7 +125,44 @@
         <dependency>
             <groupId>com.alibaba.cloud.ai</groupId>
             <artifactId>spring-ai-alibaba-graph-core</artifactId>
-            <version>1.1.2.2</version>
+            <version>1.1.2.3</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>spring-ai-autoconfigure-retry</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>spring-ai-client-chat</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>spring-ai-commons</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>spring-ai-deepseek</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>spring-ai-rag</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>spring-ai-retry</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>spring-ai-zhipuai</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Spring AI Alibaba ReactAgent; used inside shopping_react_agent nodes. -->
+        <dependency>
+            <groupId>com.alibaba.cloud.ai</groupId>
+            <artifactId>spring-ai-alibaba-agent-framework</artifactId>
+            <version>1.1.2.3</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.springframework.ai</groupId>

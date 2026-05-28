@@ -1,8 +1,8 @@
 package com.bytedance.ai.infrastructure.config;
-
 import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.document.MetadataMode;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -10,13 +10,20 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingOptions;
+import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.retry.RetryPolicy;
+import org.springframework.core.retry.RetryTemplate;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClient;
+
+import java.time.Duration;
 
 /**
  * Explicit OpenAI-compatible model wiring.
@@ -51,6 +58,24 @@ public class OpenAiClientConfiguration {
         return StringUtils.hasText(value) ? trimTrailingSlash(value) : "<blank>";
     }
 
+    private static String chatCompletionsBaseUrl(String value) {
+        String trimmed = trimTrailingSlash(value);
+        String arkSuffix = "/api/v3/chat/completions";
+        String openAiSuffix = "/v1/chat/completions";
+        if (StringUtils.hasText(trimmed) && trimmed.endsWith(arkSuffix)) {
+            return trimmed.substring(0, trimmed.length() - arkSuffix.length());
+        }
+        if (StringUtils.hasText(trimmed) && trimmed.endsWith(openAiSuffix)) {
+            return trimmed.substring(0, trimmed.length() - openAiSuffix.length());
+        }
+        return trimmed;
+    }
+
+    private static RetryTemplate retryTemplate(Integer maxRetries) {
+        int retries = maxRetries == null || maxRetries < 0 ? 3 : maxRetries;
+        return new RetryTemplate(RetryPolicy.withMaxRetries(retries));
+    }
+
     @Bean
     @Primary
     @ConditionalOnProperty(prefix = "spring.ai.openai.chat", name = "api-key")
@@ -67,16 +92,19 @@ public class OpenAiClientConfiguration {
         requireText(model, "spring.ai.openai.chat.model");
 
         OpenAiChatOptions options = OpenAiChatOptions.builder()
-                .apiKey(apiKey)
-                .baseUrl(trimTrailingSlash(baseUrl))
                 .model(model)
                 .temperature(temperature)
-                .maxRetries(maxRetries)
+                .build();
+        OpenAiApi api = OpenAiApi.builder()
+                .apiKey(apiKey)
+                .baseUrl(trimTrailingSlash(baseUrl))
                 .build();
 
         log.info("OpenAI-compatible chat client configured: providerBaseUrl={}, model={}", safeBaseUrl(baseUrl), model);
         return OpenAiChatModel.builder()
-                .options(options)
+                .openAiApi(api)
+                .defaultOptions(options)
+                .retryTemplate(retryTemplate(maxRetries))
                 .observationRegistry(observationRegistry.getIfUnique(() -> ObservationRegistry.NOOP))
                 .build();
     }
@@ -97,10 +125,7 @@ public class OpenAiClientConfiguration {
         requireText(model, "spring.ai.openai.embedding.model");
 
         OpenAiEmbeddingOptions.Builder builder = OpenAiEmbeddingOptions.builder()
-                .apiKey(apiKey)
-                .baseUrl(trimTrailingSlash(baseUrl))
-                .model(model)
-                .maxRetries(maxRetries);
+                .model(model);
         if (dimensions != null && dimensions > 0) {
             builder.dimensions(dimensions);
         }
@@ -112,10 +137,59 @@ public class OpenAiClientConfiguration {
                 dimensions == null || dimensions <= 0 ? "<provider-default>" : dimensions
         );
         return new OpenAiEmbeddingModel(
-                null,
+                OpenAiApi.builder()
+                        .apiKey(apiKey)
+                        .baseUrl(trimTrailingSlash(baseUrl))
+                        .build(),
                 MetadataMode.EMBED,
                 builder.build(),
+                retryTemplate(maxRetries),
                 observationRegistry.getIfUnique(() -> ObservationRegistry.NOOP)
         );
+    }
+
+    @Bean(name = "intentChatClient")
+    public ChatClient intentChatClient(
+            @Value("${graph.agent.intent-llm.api-key}") String apiKey,
+            @Value("${graph.agent.intent-llm.base-url}") String baseUrl,
+            @Value("${graph.agent.intent-llm.model}") String modelName,
+            @Value("${graph.agent.intent-llm.temperature:0}") Double temperature,
+            @Value("${graph.agent.intent-llm.max-tokens:512}") Integer maxTokens,
+            @Value("${graph.agent.intent-llm.timeout:10s}") Duration timeout
+    ) {
+        requireText(apiKey, "graph.agent.intent-llm.api-key");
+        requireText(baseUrl, "graph.agent.intent-llm.base-url");
+        requireText(modelName, "graph.agent.intent-llm.model");
+
+        OpenAiChatOptions options = OpenAiChatOptions.builder()
+                .model(modelName)
+                .temperature(temperature)
+                .maxTokens(maxTokens)
+                .build();
+
+        OpenAiApi openAiApi = OpenAiApi.builder()
+                .baseUrl(chatCompletionsBaseUrl(baseUrl))
+                .completionsPath("/api/v3/chat/completions")
+                .apiKey(apiKey)
+                .restClientBuilder(RestClient.builder()
+                        .requestFactory(new SimpleClientHttpRequestFactory() {{
+                            Duration t = timeout != null ? timeout : Duration.ofSeconds(10);
+                            setConnectTimeout((int) t.toMillis());
+                            setReadTimeout((int) t.toMillis());
+                        }}))
+                .build();
+
+        OpenAiChatModel model = OpenAiChatModel.builder()
+                .openAiApi(openAiApi)
+                .defaultOptions(options)
+                .build();
+
+        log.info("Intent LLM ChatClient configured: model={}, temperature={}, maxTokens={}, timeout={}",
+                modelName,
+                temperature,
+                maxTokens,
+                timeout);
+        return ChatClient.builder(model)
+                .build();
     }
 }

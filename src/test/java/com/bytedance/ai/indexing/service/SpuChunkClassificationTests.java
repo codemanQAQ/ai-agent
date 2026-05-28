@@ -1,7 +1,7 @@
 package com.bytedance.ai.indexing.service;
 
-import com.bytedance.ai.catalog.api.CatalogSpuCreateRequest;
-import com.bytedance.ai.catalog.application.SpuMarkdownRenderer;
+import com.bytedance.ai.graph.catalog.api.CatalogSpuCreateRequest;
+import com.bytedance.ai.graph.catalog.application.SpuMarkdownRenderer;
 import com.bytedance.ai.indexing.model.RagTextChunk;
 import com.bytedance.ai.shared.markdown.MarkdownDocumentParser;
 import com.bytedance.ai.shared.metadata.RagChunkType;

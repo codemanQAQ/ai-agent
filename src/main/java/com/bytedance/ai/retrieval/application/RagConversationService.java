@@ -204,7 +204,7 @@ public class RagConversationService implements com.bytedance.ai.retrieval.spi.Ag
         );
     }
 
-    // -------- AgentConversationSpi（agent 模块走的子集，不触碰 rag_ask_runs） --------
+    // -------- AgentConversationSpi（graph 编排走的子集，不触碰 rag_ask_runs） --------
 
     @Override
     @Transactional(rollbackFor = Exception.class)

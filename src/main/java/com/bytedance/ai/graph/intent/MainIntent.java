@@ -1,0 +1,29 @@
+package com.bytedance.ai.graph.intent;
+
+public enum MainIntent {
+
+    PRODUCT_RECOMMEND,
+    PRODUCT_SEARCH,
+    PRODUCT_COMPARE,
+    PRODUCT_DETAIL_QUERY,
+
+    PRICE_QUERY,
+    INVENTORY_QUERY,
+    ORDER_QUERY,
+    LOGISTICS_QUERY,
+
+    ADD_TO_CART,
+    REMOVE_FROM_CART,
+    UPDATE_CART_ITEM,
+    CART_MANAGE,
+    CREATE_ORDER,
+    CONFIRM_ORDER,
+    CANCEL_ORDER,
+
+    POLICY_QA,
+    REVIEW_SUMMARY,
+
+    CLARIFY,
+    SMALL_TALK,
+    UNKNOWN
+}

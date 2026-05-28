@@ -11,6 +11,7 @@
                 "common",
                 "shared",
                 "document::api",
+                "graph::intent-config",
                 "indexing::messaging",
                 "indexing::api",
                 "retrieval::api"

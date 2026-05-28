@@ -1,7 +1,7 @@
 package com.bytedance.ai.retrieval.application;
 
-import com.bytedance.ai.catalog.api.CatalogQueryFacade;
-import com.bytedance.ai.catalog.api.CatalogSpuView;
+import com.bytedance.ai.graph.catalog.api.CatalogQueryFacade;
+import com.bytedance.ai.graph.catalog.api.CatalogSpuView;
 import com.bytedance.ai.retrieval.model.RagRetrievedChunk;
 import com.bytedance.ai.retrieval.service.HybridRagRetriever;
 import com.bytedance.ai.retrieval.service.KeywordRagRetriever;
