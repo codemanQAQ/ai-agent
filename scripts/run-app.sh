@@ -14,4 +14,4 @@ source ./.env.sh
 bash scripts/pg-local.sh start >/dev/null 2>&1 || true
 
 echo "SPRING_AI_MODEL_CHAT=${SPRING_AI_MODEL_CHAT:-<unset>} | DATASOURCE=${SPRING_DATASOURCE_URL:-<unset>}"
-exec ./mvnw -q -DskipTests spring-boot:run
+exec ./mvnw -q -DskipTests -Dspring-boot.run.jvmArguments="-Xms256m -Xmx1024m" spring-boot:run

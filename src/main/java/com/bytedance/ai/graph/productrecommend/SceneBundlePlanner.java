@@ -6,12 +6,27 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
 @Component
 public class SceneBundlePlanner {
 
+    // 目录真实类目（LLM 给出的 bundleRoles.category 必须落在其中，否则无法按类目召回）。
+    private static final Set<String> VALID_CATEGORIES = Set.of("美妆护肤", "服饰运动", "数码电子", "食品饮料");
+    // 场景 → 角色 缓存：相同/重复场景免重复计算（②）。
+    private final Map<String, List<SceneBundleRole>> roleCache = new ConcurrentHashMap<>();
+
     public SceneBundlePlan plan(UnifiedQueryContext queryContext) {
+        return plan(queryContext, null);
+    }
+
+    /**
+     * @param llmRoles 意图 LLM 在同一次调用里给出的 bundleRoles（{role, category, keywords}），可为空。
+     *                 优先用 LLM 规划（灵活、零额外往返）；为空/无效再退到缓存→硬规则→类目推断。
+     */
+    public SceneBundlePlan plan(UnifiedQueryContext queryContext, List<Map<String, Object>> llmRoles) {
         Map<String, Object> positive = queryContext == null ? Map.of() : queryContext.positiveConstraints();
         String queryText = queryContext == null ? null : queryContext.queryText();
         String scenario = firstText(
@@ -24,7 +39,19 @@ public class SceneBundlePlanner {
         String resolvedScenario = normalizeScenario(scenario);
         String audience = firstText(positive.get("audience"), positive.get("人群"), positive.get("送给谁"));
         String usageContext = firstText(positive.get("usageContext"), positive.get("使用场景"), positive.get("用途"));
-        List<SceneBundleRole> roles = rolesFor(resolvedScenario, queryText, positive);
+
+        List<SceneBundleRole> fromLlm = rolesFromLlm(llmRoles, positive);
+        List<SceneBundleRole> roles;
+        if (!fromLlm.isEmpty()) {
+            roles = fromLlm;
+            roleCache.put(resolvedScenario, roles);                 // 缓存 LLM 结果
+        } else {
+            roles = roleCache.get(resolvedScenario);                // 命中缓存直接用
+            if (roles == null || roles.isEmpty()) {
+                roles = rolesFor(resolvedScenario, queryText, positive);   // 硬规则 / 类目推断兜底
+                roleCache.put(resolvedScenario, roles);
+            }
+        }
         return new SceneBundlePlan(
                 resolvedScenario,
                 audience,
@@ -32,6 +59,32 @@ public class SceneBundlePlanner {
                 roles,
                 "按场景拆成多个商品角色，每个角色复用公共召回底座生成候选。"
         );
+    }
+
+    /** 解析意图 LLM 给出的 bundleRoles；类目必须是四个真实类目之一，否则丢弃该角色。 */
+    @SuppressWarnings("unchecked")
+    private List<SceneBundleRole> rolesFromLlm(List<Map<String, Object>> llmRoles, Map<String, Object> baseConstraints) {
+        if (llmRoles == null || llmRoles.isEmpty()) {
+            return List.of();
+        }
+        List<SceneBundleRole> roles = new ArrayList<>();
+        int idx = 1;
+        for (Map<String, Object> raw : llmRoles) {
+            if (raw == null) {
+                continue;
+            }
+            String category = firstText(raw.get("category"), raw.get("类目"));
+            if (category == null || !VALID_CATEGORIES.contains(category.trim())) {
+                continue;                                   // 类目非法 → 跳过，避免召回不到
+            }
+            String name = firstText(raw.get("role"), raw.get("name"), raw.get("角色"), category);
+            String keywords = firstText(raw.get("keywords"), raw.get("keyword"), raw.get("关键词"), name);
+            roles.add(role("llm_role_" + idx++, name, keywords, category.trim(), baseConstraints));
+            if (roles.size() >= 5) {
+                break;                                      // 最多 5 个角色
+            }
+        }
+        return roles;
     }
 
     private List<SceneBundleRole> rolesFor(String scenario, String queryText, Map<String, Object> baseConstraints) {
@@ -64,11 +117,42 @@ public class SceneBundlePlanner {
                     role("snack_drink", "夜间补给", "熬夜 低负担 饮品 零食", "食品饮料", baseConstraints)
             );
         }
+        if (containsAny(scenario, queryText, "度假", "旅游", "旅行", "出游", "三亚", "海边", "海岛", "沙滩", "出行")) {
+            return List.of(
+                    role("sun_protection", "防晒", "防晒 防晒霜 隔离 户外", "美妆护肤", baseConstraints),
+                    role("outfit", "穿搭", "度假 穿搭 服饰 轻便", "服饰运动", baseConstraints),
+                    role("hydration", "补水修护", "旅行 补水 保湿 面膜", "美妆护肤", baseConstraints),
+                    role("travel_device", "出行数码", "便携 充电 数码", "数码电子", baseConstraints)
+            );
+        }
+        // 兜底：先从 query 文本识别涉及的真实类目，按类目建可召回角色（避免用整句当关键词导致召回为 0）。
+        List<SceneBundleRole> inferred = inferRolesFromCategories(queryText, scenario, baseConstraints);
+        if (!inferred.isEmpty()) {
+            return inferred;
+        }
         List<SceneBundleRole> fallback = new ArrayList<>();
         fallback.add(role("main_product", "核心商品", append(queryText, "核心 实用"), null, baseConstraints));
         fallback.add(role("addon_product", "搭配商品", append(queryText, "搭配 补充"), null, baseConstraints));
         fallback.add(role("budget_option", "预算友好", append(queryText, "性价比"), null, baseConstraints));
         return List.copyOf(fallback);
+    }
+
+    /** 从场景/文本识别涉及的真实类目（防晒→美妆护肤、穿搭→服饰运动…），按类目生成可召回的角色。 */
+    private List<SceneBundleRole> inferRolesFromCategories(String queryText, String scenario, Map<String, Object> base) {
+        List<SceneBundleRole> roles = new ArrayList<>();
+        if (containsAny(queryText, scenario, "防晒", "护肤", "面膜", "精华", "补水", "化妆", "美妆", "隔离")) {
+            roles.add(role("beauty", "美妆护肤", "防晒 护肤 补水", "美妆护肤", base));
+        }
+        if (containsAny(queryText, scenario, "穿搭", "衣服", "服饰", "裙", "鞋", "泳衣", "帽", "墨镜", "运动", "搭配")) {
+            roles.add(role("apparel", "服饰穿搭", "穿搭 服饰 轻便", "服饰运动", base));
+        }
+        if (containsAny(queryText, scenario, "数码", "手机", "相机", "耳机", "充电", "电子", "平板", "电脑")) {
+            roles.add(role("digital", "数码电子", "便携 数码 充电", "数码电子", base));
+        }
+        if (containsAny(queryText, scenario, "零食", "饮料", "食品", "吃", "喝", "补给")) {
+            roles.add(role("food", "食品饮料", "零食 饮品 补给", "食品饮料", base));
+        }
+        return roles;
     }
 
     private SceneBundleRole role(
@@ -81,7 +165,12 @@ public class SceneBundlePlanner {
         Map<String, Object> constraints = new LinkedHashMap<>(baseConstraints == null ? Map.of() : baseConstraints);
         constraints.put("bundleRole", name);
         if (category != null && !category.isBlank()) {
-            constraints.putIfAbsent("category", category);
+            // 角色类目必须权威覆盖：多轮会话里 baseConstraints 可能带着上一轮残留的 category
+            // （如上轮"洗面奶"），用 putIfAbsent 会导致角色类目被忽略、按错误类目召回为空。
+            constraints.put("category", category);
+            // 同时清掉会跨轮串扰本角色召回的细粒度约束（子类目/上一轮商品属性），各角色按自己的类目召回。
+            constraints.remove("subCategory");
+            constraints.remove("attributes");
         }
         return new SceneBundleRole(roleId, name, query, Map.copyOf(constraints), "为场景中的“" + name + "”角色补齐商品。");
     }

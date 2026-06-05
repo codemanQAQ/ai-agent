@@ -53,9 +53,18 @@ public final class AgentSessionStateMerger {
         RecommendationState source = base == null ? RecommendationState.empty() : base;
         Map<String, Object> positivePatch = typedMap(intentSlots == null ? null : intentSlots.get("positiveConstraints"));
         Map<String, Object> negativePatch = typedMap(intentSlots == null ? null : intentSlots.get("negativeConstraints"));
-        Map<String, Object> accumulatedConstraints = mergeNonEmpty(source.accumulatedConstraints(), positivePatch);
-        Map<String, Object> negativeConstraints = mergeNonEmpty(source.negativeConstraints(), negativePatch);
-        String scenario = nonBlankString(positivePatch.get("scenario"), source.scenario());
+        // 只有「多轮细化」才在历史累积上叠加；其它意图（换品类/换场景/对比/拍照等）视为新请求，
+        // 以当轮约束为准、重置累积，避免上一轮的 audience/attributes/brand/price 等残留污染本轮。
+        boolean refine = "MULTI_TURN_REFINE".equalsIgnoreCase(activeIntent);
+        Map<String, Object> accumulatedConstraints = refine
+                ? mergeNonEmpty(source.accumulatedConstraints(), positivePatch)
+                : mergeNonEmpty(null, positivePatch);
+        Map<String, Object> negativeConstraints = refine
+                ? mergeNonEmpty(source.negativeConstraints(), negativePatch)
+                : mergeNonEmpty(null, negativePatch);
+        String scenario = refine
+                ? nonBlankString(positivePatch.get("scenario"), source.scenario())
+                : nonBlankString(positivePatch.get("scenario"), null);
 
         return new RecommendationState(
                 nonBlankString(activeIntent, source.activeIntent()),

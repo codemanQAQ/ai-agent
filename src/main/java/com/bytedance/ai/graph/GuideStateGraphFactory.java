@@ -788,9 +788,33 @@ public class GuideStateGraphFactory {
         if (recentMessages.isEmpty()) {
             return "";
         }
+        // 只喂用户历史话术、且仅最近几条：助手的长答复（如三亚组合清单）会强烈锚定模型，
+        // 让后续不相关的新请求也被误判为延续上一场景；意图分类只需用户自己的历史措辞。
         StringBuilder builder = new StringBuilder();
-        for (ConversationMessage message : recentMessages) {
-            builder.append(message.role()).append(": ").append(message.content()).append('\n');
+        int kept = 0;
+        int maxUserTurns = 4;
+        List<ConversationMessage> tail = recentMessages.size() > maxUserTurns * 3
+                ? recentMessages.subList(recentMessages.size() - maxUserTurns * 3, recentMessages.size())
+                : recentMessages;
+        for (ConversationMessage message : tail) {
+            if (message.role() == null || !"user".equalsIgnoreCase(message.role())) {
+                continue;
+            }
+            String content = message.content() == null ? "" : message.content().strip();
+            if (content.isEmpty()) {
+                continue;
+            }
+            builder.append("user: ").append(content).append('\n');
+            kept++;
+        }
+        // 只保留最近 maxUserTurns 条用户消息
+        if (kept > maxUserTurns) {
+            String[] lines = builder.toString().strip().split("\n");
+            StringBuilder trimmed = new StringBuilder();
+            for (int i = Math.max(0, lines.length - maxUserTurns); i < lines.length; i++) {
+                trimmed.append(lines[i]).append('\n');
+            }
+            return trimmed.toString().trim();
         }
         return builder.toString().trim();
     }
@@ -882,7 +906,7 @@ public class GuideStateGraphFactory {
             List<ProductRecallCandidate> recalledCandidates;
             ProductCandidatePostProcessResult postProcessResult;
             if (subScene == ProductRecommendSubScene.SCENE_BUNDLE_RECOMMEND) {
-                SceneBundlePlan bundlePlan = sceneBundlePlanner.plan(queryContext);
+                SceneBundlePlan bundlePlan = sceneBundlePlanner.plan(queryContext, bundleRolesFromState(state));
                 List<Map<String, Object>> roleResults = new ArrayList<>();
                 List<ProductRecallCandidate> allRecalledCandidates = new ArrayList<>();
                 List<ProductRecallCandidate> roleFinalCandidates = new ArrayList<>();
@@ -1899,8 +1923,35 @@ public class GuideStateGraphFactory {
         };
     }
 
+    /** 从意图槽位里取出 LLM 同一次调用产出的 bundleRoles（场景组合的角色规划）。 */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> bundleRolesFromState(OverAllState state) {
+        Object slotsObj = state.value(GuideGraphStateKeys.INTENT_SLOTS).orElse(null);
+        if (!(slotsObj instanceof Map<?, ?> slots)) {
+            return List.of();
+        }
+        Object roles = ((Map<String, Object>) slots).get("bundleRoles");
+        if (roles instanceof List<?> list) {
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> m) {
+                    result.add((Map<String, Object>) m);
+                }
+            }
+            return result;
+        }
+        return List.of();
+    }
+
     private String routeByMockIntent(OverAllState state) {
-        return state.value(GuideGraphStateKeys.TARGET_WORKFLOW, GuideGraphNodeNames.CLARIFY_WORKFLOW);
+        String target = state.value(GuideGraphStateKeys.TARGET_WORKFLOW, GuideGraphNodeNames.CLARIFY_WORKFLOW);
+        // 模型判定 needClarify=true（条件不足）时，推荐类意图改走澄清工作流——先追问偏好，
+        // 而不是凭模糊条件直接猜着推荐。业务类（购物车/下单）有各自子图的澄清机制，这里不拦截。
+        boolean needClarify = state.value(GuideGraphStateKeys.NEED_CLARIFY, false);
+        if (needClarify && GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW.equals(target)) {
+            return GuideGraphNodeNames.CLARIFY_WORKFLOW;
+        }
+        return target;
     }
 
     private String routeByConversationExists(OverAllState state) {
