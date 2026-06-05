@@ -21,6 +21,9 @@ import com.bytedance.ai.graph.cartmanage.ProductCatalogResolver;
 import com.bytedance.ai.graph.cartmanage.StockResult;
 import com.bytedance.ai.graph.conversation.ConversationMessage;
 import com.bytedance.ai.graph.intent.support.SlotKeys;
+import com.bytedance.ai.graph.session.AgentSessionState;
+import com.bytedance.ai.graph.session.CandidateSnapshot;
+import com.bytedance.ai.graph.session.CandidateSnapshotItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -42,6 +45,7 @@ public class CartManageSubgraphFactory {
             "米色", "棕色", "咖色", "银色", "金色"
     );
     private static final Pattern SIZE_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*(?:寸|英寸|inch|in)\\b?", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ORDINAL_REFERENCE_PATTERN = Pattern.compile("(?:第)?\\s*([1-5一二三四五])\\s*(?:个|款|件|号)");
     private static final List<Pattern> PRICE_PATTERNS = List.of(
             Pattern.compile("(?:商品)?价格\\s*(?:为|是|=|：|:)?\\s*[¥￥]?\\s*(\\d+(?:\\.\\d{1,2})?)"),
             Pattern.compile("(?:预算|价位)\\s*(?:为|是|=|：|:)?\\s*[¥￥]?\\s*(\\d+(?:\\.\\d{1,2})?)"),
@@ -56,6 +60,7 @@ public class CartManageSubgraphFactory {
     private final PendingCartActionRepository pendingCartActionRepository;
     private final CartManageSlotFillingService slotFillingService;
     private final CandidateSelectionLlmService candidateSelectionLlmService;
+    private final com.bytedance.ai.graph.catalog.api.CatalogQueryFacade catalogQueryFacade;
 
     public CartManageSubgraphFactory(
             CartQueryService cartQueryService,
@@ -64,7 +69,8 @@ public class CartManageSubgraphFactory {
             ProductCatalogResolver productCatalogResolver,
             PendingCartActionRepository pendingCartActionRepository,
             CartManageSlotFillingService slotFillingService,
-            CandidateSelectionLlmService candidateSelectionLlmService
+            CandidateSelectionLlmService candidateSelectionLlmService,
+            com.bytedance.ai.graph.catalog.api.CatalogQueryFacade catalogQueryFacade
     ) {
         this.cartQueryService = cartQueryService;
         this.cartCommandService = cartCommandService;
@@ -73,6 +79,27 @@ public class CartManageSubgraphFactory {
         this.pendingCartActionRepository = pendingCartActionRepository;
         this.slotFillingService = slotFillingService;
         this.candidateSelectionLlmService = candidateSelectionLlmService;
+        this.catalogQueryFacade = catalogQueryFacade;
+    }
+
+    /**
+     * 把召回快照里的外部商品 ref（如 p_beauty_009）转换为目录数字主键，供库存检查与购物车落库使用。
+     * 已是数字、或解析不到对应 SPU 时，原样返回。
+     */
+    private String toNumericProductId(String productId) {
+        if (!StringUtils.hasText(productId)) {
+            return productId;
+        }
+        if (productId.chars().allMatch(Character::isDigit)) {
+            return productId;
+        }
+        try {
+            return catalogQueryFacade.findSpuByExternalRef(productId)
+                    .map(spu -> String.valueOf(spu.id()))
+                    .orElse(productId);
+        } catch (RuntimeException ignored) {
+            return productId;
+        }
     }
 
     public StateGraph build() {
@@ -260,7 +287,11 @@ public class CartManageSubgraphFactory {
         if (pendingSelection) {
             action = CartAction.CONFIRM;
         } else {
-            String mainCartAction = asString(intentSlots.get(SlotKeys.CART_ACTION));
+            String mainCartAction = firstNonBlank(
+                    actionField(intentSlots, SlotKeys.ACTION_TYPE),
+                    state.value(GuideGraphStateKeys.SUB_INTENT).map(Object::toString).orElse(null),
+                    asString(intentSlots.get(SlotKeys.CART_ACTION))
+            );
             if (StringUtils.hasText(mainCartAction)) {
                 action = parseCartAction(mainCartAction);
             }
@@ -308,22 +339,42 @@ public class CartManageSubgraphFactory {
                 action, userId, conversationId);
 
         CartManageSlots filledSlots = slotFillingService.extract(userMessage, conversationMemory(state));
+        String actionTargetRef = actionField(intentSlots, SlotKeys.ACTION_TARGET_REF);
+        String actionSkuSpec = actionField(intentSlots, SlotKeys.ACTION_SKU_SPEC);
+        // 从上一轮推荐的候选快照解析命中项，带回 productId + skuId。
+        // 序数既可能来自显式 itemIndex 槽位，也可能藏在 targetRef 文本（"第一个"/"1"/"第2款"）里——
+        // 两者都用上，避免 DeepSeek 表述差异导致解析时灵时不灵。
+        // 仅带 productId 而 skuId 为 null 会导致 ADD 路由落到 FINAL→澄清，无法加入购物车。
+        Integer snapshotIndexHint = firstNonNull(
+                asInteger(intentSlots.get(SlotKeys.ITEM_INDEX)),
+                filledSlots.itemIndex()
+        );
+        CandidateSnapshotItem snapshotItem = resolveCandidateSnapshotItem(state, actionTargetRef, snapshotIndexHint);
+        String snapshotProductId = snapshotItem == null ? null : snapshotItem.productId();
+        String snapshotSkuId = snapshotItem == null ? null : snapshotItem.skuId();
         String productName = firstNonBlank(
                 asString(intentSlots.get(SlotKeys.PRODUCT_NAME)),
+                snapshotProductId == null ? actionTargetRef : null,
                 filledSlots.productName()
         );
         String productId = firstNonBlank(
                 asString(intentSlots.get(SlotKeys.PRODUCT_ID)),
                 asString(intentSlots.get(SlotKeys.PRODUCT_REF)),
+                snapshotProductId,
                 filledSlots.productId()
         );
-        String skuId = firstNonBlank(asString(intentSlots.get(SlotKeys.SKU_ID)), filledSlots.skuId());
+        String skuId = firstNonBlank(asString(intentSlots.get(SlotKeys.SKU_ID)), actionSkuSpec,
+                snapshotSkuId, filledSlots.skuId());
         BigDecimal expectedPrice = firstNonNull(
                 asBigDecimal(intentSlots.get(SlotKeys.EXPECTED_PRICE)),
                 filledSlots.expectedPrice(),
                 extractExpectedPrice(userMessage)
         );
-        Integer quantity = firstNonNull(asInteger(intentSlots.get(SlotKeys.QUANTITY)), filledSlots.quantity());
+        Integer quantity = firstNonNull(
+                asInteger(actionField(intentSlots, SlotKeys.ACTION_QUANTITY)),
+                asInteger(intentSlots.get(SlotKeys.QUANTITY)),
+                filledSlots.quantity()
+        );
         Integer itemIndex = firstNonNull(asInteger(intentSlots.get(SlotKeys.ITEM_INDEX)), filledSlots.itemIndex());
         Boolean contextualReference = firstNonNull(
                 Boolean.TRUE.equals(intentSlots.get(SlotKeys.CONTEXTUAL_REFERENCE)) ? Boolean.TRUE : null,
@@ -335,7 +386,7 @@ public class CartManageSubgraphFactory {
         }
 
         updates.put(CartGraphStateKeys.PRODUCT_NAME, productName);
-        updates.put(CartGraphStateKeys.PRODUCT_ID, productId);
+        updates.put(CartGraphStateKeys.PRODUCT_ID, toNumericProductId(productId));
         updates.put(CartGraphStateKeys.SKU_ID, skuId);
         updates.put(CartGraphStateKeys.EXPECTED_PRICE, expectedPrice);
         updates.put(CartGraphStateKeys.QUANTITY, quantity);
@@ -428,7 +479,7 @@ public class CartManageSubgraphFactory {
             updates.put(CartGraphStateKeys.NEED_USER_INPUT, true);
         } else if (matchedCandidates.size() == 1) {
             ProductCandidate only = matchedCandidates.getFirst();
-            updates.put(CartGraphStateKeys.PRODUCT_ID, only.productId());
+            updates.put(CartGraphStateKeys.PRODUCT_ID, toNumericProductId(only.productId()));
             updates.put(CartGraphStateKeys.SKU_ID, only.skuId());
             updates.put(CartGraphStateKeys.PRODUCT_NAME, only.productName());
             updates.put(CartGraphStateKeys.SELECTED_CANDIDATE, only);
@@ -708,7 +759,7 @@ public class CartManageSubgraphFactory {
         }
 
         ProductCandidate selected = pending.candidates().get(selectedIndex - 1);
-        updates.put(CartGraphStateKeys.PRODUCT_ID, selected.productId());
+        updates.put(CartGraphStateKeys.PRODUCT_ID, toNumericProductId(selected.productId()));
         updates.put(CartGraphStateKeys.SKU_ID, selected.skuId());
         updates.put(CartGraphStateKeys.QUANTITY, pending.quantity() == null ? 1 : pending.quantity());
         updates.put(CartGraphStateKeys.SELECTED_CANDIDATE, selected);
@@ -1218,7 +1269,7 @@ public class CartManageSubgraphFactory {
         return switch (value.trim().toUpperCase(Locale.ROOT)) {
             case "ADD", "ADD_TO_CART" -> CartAction.ADD;
             case "REMOVE", "REMOVE_ITEM", "REMOVE_FROM_CART" -> CartAction.REMOVE;
-            case "UPDATE_QUANTITY", "UPDATE", "UPDATE_CART_ITEM" -> CartAction.UPDATE_QUANTITY;
+            case "UPDATE_QUANTITY", "UPDATE", "UPDATE_CART_ITEM", "REPLACE_SKU" -> CartAction.UPDATE_QUANTITY;
             case "VIEW", "VIEW_CART" -> CartAction.VIEW;
             case "CLEAR", "CLEAR_CART" -> CartAction.CLEAR;
             case "CONFIRM" -> CartAction.CONFIRM;
@@ -1246,6 +1297,67 @@ public class CartManageSubgraphFactory {
                 .filter(v -> v instanceof Map)
                 .map(v -> (Map<String, Object>) v)
                 .orElse(Map.of());
+    }
+
+    private String actionField(Map<String, Object> intentSlots, String key) {
+        Object action = intentSlots.get(SlotKeys.ACTION);
+        if (!(action instanceof Map<?, ?> actionMap)) {
+            return null;
+        }
+        Object value = actionMap.get(key);
+        return asString(value);
+    }
+
+    private CandidateSnapshotItem resolveCandidateSnapshotItem(OverAllState state, String targetRef, Integer indexHint) {
+        if (!StringUtils.hasText(targetRef) && indexHint == null) {
+            return null;
+        }
+        CandidateSnapshot snapshot = state.value(GuideGraphStateKeys.AGENT_SESSION_STATE, AgentSessionState.class)
+                .map(AgentSessionState::recommendationState)
+                .map(recommendation -> recommendation == null ? CandidateSnapshot.empty() : recommendation.candidateSnapshot())
+                .orElse(CandidateSnapshot.empty());
+        List<String> productIds = snapshot.productIds();
+        if (productIds.isEmpty()) {
+            return null;
+        }
+        // 优先用显式 itemIndex 槽位；没有再从 targetRef 文本里解析序数。
+        int index = (indexHint != null && indexHint >= 1) ? indexHint : parseSnapshotReferenceIndex(targetRef, productIds.size());
+        if (index < 1 || index > productIds.size()) {
+            return null;
+        }
+        String productId = productIds.get(index - 1);
+        // 优先用 productId 找到对应快照项（带 skuId）；找不到则按位置兜底。
+        for (CandidateSnapshotItem item : snapshot.items()) {
+            if (item != null && productId.equals(item.productId())) {
+                return item;
+            }
+        }
+        List<CandidateSnapshotItem> items = snapshot.items();
+        if (index <= items.size()) {
+            return items.get(index - 1);
+        }
+        return new CandidateSnapshotItem(index, productId, null, null, null, null, null, null, null, null);
+    }
+
+    private int parseSnapshotReferenceIndex(String targetRef, int candidateCount) {
+        String normalized = normalizeMatchText(targetRef);
+        if (!StringUtils.hasText(normalized)) {
+            return -1;
+        }
+        if (candidateCount == 1 && (
+                normalized.contains("刚才那个")
+                        || normalized.contains("这款")
+                        || normalized.contains("这个")
+                        || normalized.contains("上一个")
+        )) {
+            return 1;
+        }
+        Matcher matcher = ORDINAL_REFERENCE_PATTERN.matcher(targetRef);
+        if (matcher.find()) {
+            Integer index = parseOneToFive(matcher.group(1));
+            return index == null ? -1 : index;
+        }
+        return -1;
     }
 
     private String conversationMemory(OverAllState state) {

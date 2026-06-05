@@ -1,0 +1,21 @@
+{
+  "embeddings": "C:\\development\\ai-agent\\src\\main\\resources\\db\\ecommerce_offline\\ecom-product-embeddings.jsonl",
+  "index_output": "C:\\development\\ai-agent\\src\\main\\resources\\db\\ecommerce_offline\\faiss\\ecom-product.index",
+  "id_map_output": "C:\\development\\ai-agent\\src\\main\\resources\\db\\ecommerce_offline\\faiss\\ecom-product-id-map.json",
+  "chunks": "C:\\development\\ai-agent\\src\\main\\resources\\db\\ecommerce_offline\\ecom-product-chunks.jsonl",
+  "vector_count": 1292,
+  "dimension": 2048,
+  "metric": "inner_product_on_l2_normalized_vectors",
+  "by_modality": {
+    "image": 100,
+    "text": 1192
+  },
+  "by_chunk_type": {
+    "image_embedding": 100,
+    "marketing_description": 100,
+    "official_faq": 439,
+    "product_profile": 100,
+    "review_summary": 100,
+    "user_review": 453
+  }
+}

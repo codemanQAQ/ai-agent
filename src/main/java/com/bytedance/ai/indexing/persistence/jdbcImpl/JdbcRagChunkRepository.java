@@ -4,6 +4,7 @@ import com.bytedance.ai.indexing.persistence.RagChunkRepository;
 import com.bytedance.ai.indexing.persistence.RagChunkRecord;
 import com.bytedance.ai.indexing.persistence.RagChunkSearchRecord;
 import com.bytedance.ai.indexing.model.RagChunkDraft;
+import com.bytedance.ai.shared.metadata.RagSearchFilter;
 import com.bytedance.ai.shared.support.RagJsonCodec;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -167,6 +168,11 @@ public class JdbcRagChunkRepository implements RagChunkRepository {
 
     @Override
     public List<RagChunkSearchRecord> findKeywordCandidates(Set<String> tokens, int limit) {
+        return findKeywordCandidates(tokens, limit, null);
+    }
+
+    @Override
+    public List<RagChunkSearchRecord> findKeywordCandidates(Set<String> tokens, int limit, RagSearchFilter filter) {
         // 先做轻量归一化，避免把空 token 或超长 token 列表直接带进 SQL。
         List<String> normalizedTokens = tokens == null ? List.of() : tokens.stream()
                 .filter(token -> token != null && !token.isBlank())
@@ -179,16 +185,17 @@ public class JdbcRagChunkRepository implements RagChunkRepository {
 
         if (isPostgreSql()) {
             // PostgreSQL 优先走 FTS + trigram 组合排序，命中质量更稳定。
-            return findKeywordCandidatesPostgreSql(normalizedTokens, limit, isPgTrgmEnabled());
+            return findKeywordCandidatesPostgreSql(normalizedTokens, limit, isPgTrgmEnabled(), filter);
         }
         // 其他数据库退化为 LIKE 检索，保证开发和测试环境仍可运行。
-        return findKeywordCandidatesFallback(normalizedTokens, limit);
+        return findKeywordCandidatesFallback(normalizedTokens, limit, filter);
     }
 
     private List<RagChunkSearchRecord> findKeywordCandidatesPostgreSql(
             List<String> normalizedTokens,
             int limit,
-            boolean trigramEnabled
+            boolean trigramEnabled,
+            RagSearchFilter filter
     ) {
         String searchText = String.join(" ", normalizedTokens);
         String likePattern = likePattern(searchText);
@@ -231,8 +238,9 @@ public class JdbcRagChunkRepository implements RagChunkRepository {
             sql.append(", 0.0 AS trigram_score");
         }
 
-        sql.append(searchableFromSql())
-                .append(" AND (")
+        sql.append(searchableFromSql());
+        appendPostgreSqlFilter(sql, args, filter);
+        sql.append(" AND (")
                 .append(ftsVector)
                 .append(" @@ ")
                 .append(tsQuery);
@@ -268,7 +276,7 @@ public class JdbcRagChunkRepository implements RagChunkRepository {
         return jdbc.query(sql.toString(), searchRowMapper(), args.toArray());
     }
 
-    private List<RagChunkSearchRecord> findKeywordCandidatesFallback(List<String> normalizedTokens, int limit) {
+    private List<RagChunkSearchRecord> findKeywordCandidatesFallback(List<String> normalizedTokens, int limit, RagSearchFilter filter) {
         String metadataText = "LOWER(CAST(c.metadata AS TEXT))";
         List<String> scoreTerms = new ArrayList<>();
         List<String> matchClauses = new ArrayList<>();
@@ -286,6 +294,12 @@ public class JdbcRagChunkRepository implements RagChunkRepository {
             args.add(pattern);
         }
 
+        String sql = searchableSelectSql()
+                + ", (" + String.join(" + ", scoreTerms) + ") AS candidate_score"
+                + searchableFromSql();
+        StringBuilder sqlBuilder = new StringBuilder(sql);
+        appendFallbackFilter(sqlBuilder, args, filter);
+
         for (String token : normalizedTokens) {
             String pattern = likePattern(token);
             matchClauses.add("""
@@ -298,15 +312,93 @@ public class JdbcRagChunkRepository implements RagChunkRepository {
             args.add(pattern);
         }
 
-        String sql = searchableSelectSql()
-                + ", (" + String.join(" + ", scoreTerms) + ") AS candidate_score"
-                + searchableFromSql()
-                + " AND (" + String.join(" OR ", matchClauses) + ")"
-                + " ORDER BY candidate_score DESC, c.document_id, c.chunk_index"
-                + " LIMIT ?";
+        sqlBuilder.append(" AND (").append(String.join(" OR ", matchClauses)).append(")")
+                .append(" ORDER BY candidate_score DESC, c.document_id, c.chunk_index")
+                .append(" LIMIT ?");
         args.add(limit);
 
-        return jdbc.query(sql, searchRowMapper(), args.toArray());
+        return jdbc.query(sqlBuilder.toString(), searchRowMapper(), args.toArray());
+    }
+
+    private void appendPostgreSqlFilter(StringBuilder sql, List<Object> args, RagSearchFilter filter) {
+        if (filter == null || filter.isEmpty()) {
+            return;
+        }
+        appendIn(sql, args, "d.external_ref", filter.externalRefs());
+        appendIn(sql, args, "c.metadata->>'productId'", filter.productIds());
+        appendCatalogSpuFilterPostgreSql(sql, args, filter.catalogSpuIds());
+        appendIn(sql, args, "c.metadata->>'chunkType'", chunkTypeNames(filter));
+    }
+
+    private void appendFallbackFilter(StringBuilder sql, List<Object> args, RagSearchFilter filter) {
+        if (filter == null || filter.isEmpty()) {
+            return;
+        }
+        appendIn(sql, args, "d.external_ref", filter.externalRefs());
+        appendMetadataTextIn(sql, args, "productId", filter.productIds());
+        appendCatalogSpuFilterFallback(sql, args, filter.catalogSpuIds());
+        appendMetadataTextIn(sql, args, "chunkType", chunkTypeNames(filter));
+    }
+
+    private List<String> chunkTypeNames(RagSearchFilter filter) {
+        if (filter == null || filter.chunkTypes().isEmpty()) {
+            return List.of();
+        }
+        return filter.chunkTypes().stream()
+                .map(Enum::name)
+                .toList();
+    }
+
+    private void appendIn(StringBuilder sql, List<Object> args, String expression, List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        sql.append(" AND ").append(expression).append(" IN (")
+                .append(String.join(",", Collections.nCopies(values.size(), "?")))
+                .append(")");
+        args.addAll(values);
+    }
+
+    private void appendCatalogSpuFilterPostgreSql(StringBuilder sql, List<Object> args, List<Long> values) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        String placeholders = String.join(",", Collections.nCopies(values.size(), "?"));
+        sql.append(" AND (c.metadata->>'spuId' IN (")
+                .append(placeholders)
+                .append(") OR c.metadata->>'catalogSpuId' IN (")
+                .append(String.join(",", Collections.nCopies(values.size(), "?")))
+                .append("))");
+        values.stream().map(String::valueOf).forEach(args::add);
+        values.stream().map(String::valueOf).forEach(args::add);
+    }
+
+    private void appendCatalogSpuFilterFallback(StringBuilder sql, List<Object> args, List<Long> values) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        String metadataText = "CAST(c.metadata AS TEXT)";
+        List<String> clauses = new ArrayList<>();
+        for (Long value : values) {
+            clauses.add(metadataText + " LIKE ? ESCAPE '\\'");
+            clauses.add(metadataText + " LIKE ? ESCAPE '\\'");
+            args.add("%spuId%" + value + "%");
+            args.add("%catalogSpuId%" + value + "%");
+        }
+        sql.append(" AND (").append(String.join(" OR ", clauses)).append(")");
+    }
+
+    private void appendMetadataTextIn(StringBuilder sql, List<Object> args, String key, List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        String metadataText = "CAST(c.metadata AS TEXT)";
+        List<String> clauses = new ArrayList<>();
+        for (String value : values) {
+            clauses.add(metadataText + " LIKE ? ESCAPE '\\'");
+            args.add("%" + key + "%" + value + "%");
+        }
+        sql.append(" AND (").append(String.join(" OR ", clauses)).append(")");
     }
 
     @Override

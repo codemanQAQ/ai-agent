@@ -14,6 +14,7 @@ public class IntentLlmProperties {
 
     private String baseUrl;
     private String ApiKey;
+    private String completionsPath;
     private String model;
     private Double temperature;
     private Integer maxTokens;
@@ -81,5 +82,13 @@ public class IntentLlmProperties {
 
     public void setBaseUrl(String baseUrl) {
         this.baseUrl = baseUrl;
+    }
+
+    public String getCompletionsPath() {
+        return completionsPath;
+    }
+
+    public void setCompletionsPath(String completionsPath) {
+        this.completionsPath = completionsPath;
     }
 }

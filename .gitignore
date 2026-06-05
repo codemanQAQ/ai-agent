@@ -61,3 +61,4 @@ build/
 
 # 本地演示录屏 / SSE 抓帧产物
 scripts/rag/.evidence/
+.env.sh

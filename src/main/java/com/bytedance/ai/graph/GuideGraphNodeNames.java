@@ -4,9 +4,12 @@ public final class GuideGraphNodeNames {
 
     public static final String CHECK_CONVERSATION = "check_conversation";
     public static final String LOAD_MEMORY = "load_memory";
+    public static final String LOAD_AGENT_SESSION_STATE = "load_agent_session_state";
+    public static final String CURRENT_TURN_MULTIMODAL_UNIFIER = "current_turn_multimodal_unifier";
     public static final String INIT_CONVERSATION = "init_conversation";
     public static final String SAVE_USER_MESSAGE = "save_user_message";
     public static final String MAIN_INTENT_ROUTER = "main_intent_router";
+    public static final String AGENT_SESSION_STATE_MERGER = "agent_session_state_merger";
     public static final String PRODUCT_RECOMMEND_WORKFLOW = "product_recommend_workflow";
     public static final String PRODUCT_SEARCH_WORKFLOW = "product_search_workflow";
     public static final String PRODUCT_COMPARE_WORKFLOW = "product_compare_workflow";
@@ -28,6 +31,7 @@ public final class GuideGraphNodeNames {
     public static final String CLARIFY_WORKFLOW = "clarify_workflow";
     public static final String SMALL_TALK_WORKFLOW = "small_talk_workflow";
     public static final String BUILD_ANSWER_CONTEXT = "build_answer_context";
+    public static final String TERMINAL_STATE_WRITEBACK = "terminal_state_writeback";
 
     public static final String RECOMMEND_WORKFLOW = PRODUCT_RECOMMEND_WORKFLOW;
     public static final String SEARCH_WORKFLOW = PRODUCT_SEARCH_WORKFLOW;

@@ -52,13 +52,15 @@ public class MainIntentRouterService {
                 .addKeyValue(RagLogFields.EVENT_NAME, "main_intent.normalized")
                 .addKeyValue(RagLogFields.EVENT_OUTCOME, RagLogFields.OUTCOME_SUCCESS)
                 .addKeyValue("main_intent.intent", normalizedDecision.intent().name())
+                .addKeyValue("main_intent.sub_intent", normalizedDecision.subIntent())
                 .addKeyValue("main_intent.confidence", normalizedDecision.confidence())
                 .addKeyValue("main_intent.need_clarify", normalizedDecision.needClarify())
                 .addKeyValue("main_intent.write_action", normalizedDecision.writeAction())
                 .addKeyValue("main_intent.target_workflow", normalizedDecision.targetWorkflow())
                 .addKeyValue("main_intent.missing_slots", normalizedDecision.missingSlots())
-                .log("main intent normalized: intent={}, confidence={}, needClarify={}, writeAction={}, targetWorkflow={}, missingSlots={}, reason={}",
+                .log("main intent normalized: intent={}, subIntent={}, confidence={}, needClarify={}, writeAction={}, targetWorkflow={}, missingSlots={}, reason={}",
                         normalizedDecision.intent(),
+                        normalizedDecision.subIntent(),
                         normalizedDecision.confidence(),
                         normalizedDecision.needClarify(),
                         normalizedDecision.writeAction(),

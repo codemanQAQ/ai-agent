@@ -12,6 +12,7 @@ import com.bytedance.ai.graph.GuideGraphStateKeys;
 import com.bytedance.ai.graph.cartmanage.CartCommandService;
 import com.bytedance.ai.graph.cartmanage.CartMutationResult;
 import com.bytedance.ai.graph.cartmanage.subgraph.PendingCartActionRepository;
+import com.bytedance.ai.graph.intent.support.SlotKeys;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
@@ -55,6 +56,28 @@ class OrderManageSubgraphFactoryTest {
     }
 
     @Test
+    void checkoutUsesUnifiedActionSlotsFirst() throws Exception {
+        TestRig rig = new TestRig(cart(item(1L, 101L, "苹果", 2)));
+
+        OverAllState state = rig.invoke(
+                "帮我处理一下",
+                Map.of(
+                        GuideGraphStateKeys.SUB_INTENT, "CREATE_ORDER",
+                        GuideGraphStateKeys.INTENT_SLOTS, Map.of(
+                                SlotKeys.ACTION, Map.of(SlotKeys.ACTION_TYPE, "CREATE_ORDER")
+                        )
+                )
+        );
+
+        assertThat(rig.pending.active).isPresent();
+        assertThat(rig.pending.active.get().status()).isEqualTo(OrderManageStatus.WAITING_ADDRESS);
+        assertThat(state.value(OrderManageStateKeys.ORDER_ACTION, ""))
+                .isEqualTo(OrderManageAction.CHECKOUT_REQUEST.name());
+        assertThat(state.value(OrderManageStateKeys.NODE_MESSAGE, ""))
+                .contains("请补充");
+    }
+
+    @Test
     void waitingAddressMissingPhoneAsksForPhone() throws Exception {
         TestRig rig = new TestRig(cart(item(1L, 101L, "苹果", 1)));
         rig.pending.active = Optional.of(rig.pendingRecord(OrderManageStatus.WAITING_ADDRESS, Map.of()));
@@ -79,6 +102,26 @@ class OrderManageSubgraphFactoryTest {
         assertThat(state.value(OrderManageStateKeys.NODE_MESSAGE, ""))
                 .contains("请确认订单信息")
                 .contains("确认下单请回复");
+    }
+
+    @Test
+    void fillAddressUsesUnifiedActionAddressRefFirst() throws Exception {
+        TestRig rig = new TestRig(cart(item(1L, 101L, "苹果", 1)));
+        rig.pending.active = Optional.of(rig.pendingRecord(OrderManageStatus.WAITING_ADDRESS, Map.of()));
+
+        OverAllState state = rig.invoke(
+                "补地址",
+                Map.of(GuideGraphStateKeys.INTENT_SLOTS, Map.of(
+                        SlotKeys.ACTION, Map.of(
+                                SlotKeys.ACTION_TYPE, "FILL_ADDRESS",
+                                SlotKeys.ACTION_ADDRESS_REF, "UNSW High Street, Kensington NSW 2052，联系人 Zhang，电话 0412345678"
+                        )
+                ))
+        );
+
+        assertThat(rig.pending.active.get().status()).isEqualTo(OrderManageStatus.WAITING_CONFIRMATION);
+        assertThat(state.value(OrderManageStateKeys.NODE_MESSAGE, ""))
+                .contains("请确认订单信息");
     }
 
     @Test
@@ -110,6 +153,28 @@ class OrderManageSubgraphFactoryTest {
         assertThat(rig.pending.cancelled).isTrue();
         assertThat(rig.inventory.deductCalls).isZero();
         assertThat(rig.mockOrders.created).isZero();
+        assertThat(state.value(OrderManageStateKeys.ORDER_STATUS, ""))
+                .isEqualTo(OrderManageStatus.CANCELLED.name());
+    }
+
+    @Test
+    void cancelUsesUnifiedActionSlotsFirst() throws Exception {
+        TestRig rig = new TestRig(cart(item(1L, 101L, "苹果", 1)));
+        rig.pending.active = Optional.of(rig.pendingRecord(OrderManageStatus.WAITING_CONFIRMATION, Map.of()));
+
+        OverAllState state = rig.invoke(
+                "先处理这个",
+                Map.of(
+                        GuideGraphStateKeys.SUB_INTENT, "CANCEL_ORDER",
+                        GuideGraphStateKeys.INTENT_SLOTS, Map.of(
+                                SlotKeys.ACTION, Map.of(SlotKeys.ACTION_TYPE, "CANCEL_ORDER")
+                        )
+                )
+        );
+
+        assertThat(rig.pending.cancelled).isTrue();
+        assertThat(state.value(OrderManageStateKeys.ORDER_ACTION, ""))
+                .isEqualTo(OrderManageAction.CANCEL_ORDER.name());
         assertThat(state.value(OrderManageStateKeys.ORDER_STATUS, ""))
                 .isEqualTo(OrderManageStatus.CANCELLED.name());
     }
@@ -151,6 +216,67 @@ class OrderManageSubgraphFactoryTest {
         assertThat(rig.mockOrders.created).isEqualTo(1);
         assertThat(second.value(OrderManageStateKeys.NODE_MESSAGE, ""))
                 .contains("当前没有待确认的订单");
+    }
+
+    @Test
+    void orderQueryUsesUnifiedActionOrderRef() throws Exception {
+        TestRig rig = new TestRig(cart());
+        rig.mockOrders.latest = Optional.of(new MockOrderRecord(
+                1L,
+                "ORD-001",
+                USER_ID,
+                CONVERSATION_ID,
+                Map.of("items", List.of()),
+                Map.of(),
+                new BigDecimal("19.80"),
+                "CREATED",
+                LocalDateTime.now()
+        ));
+
+        OverAllState state = rig.invoke(
+                "查订单",
+                Map.of(GuideGraphStateKeys.INTENT_SLOTS, Map.of(
+                        SlotKeys.ACTION, Map.of(
+                                SlotKeys.ACTION_TYPE, "ORDER_QUERY",
+                                SlotKeys.ACTION_ORDER_REF, "ORD-001"
+                        )
+                ))
+        );
+
+        assertThat(state.value(OrderManageStateKeys.ORDER_ACTION, ""))
+                .isEqualTo(OrderManageAction.ORDER_QUERY.name());
+        assertThat(state.value(OrderManageStateKeys.NODE_MESSAGE, ""))
+                .contains("ORD-001")
+                .contains("状态");
+    }
+
+    @Test
+    void logisticsQueryReturnsMockLogisticsMessage() throws Exception {
+        TestRig rig = new TestRig(cart());
+        rig.mockOrders.latest = Optional.of(new MockOrderRecord(
+                1L,
+                "ORD-002",
+                USER_ID,
+                CONVERSATION_ID,
+                Map.of("items", List.of()),
+                Map.of(),
+                new BigDecimal("9.90"),
+                "CREATED",
+                LocalDateTime.now()
+        ));
+
+        OverAllState state = rig.invoke(
+                "查物流",
+                Map.of(GuideGraphStateKeys.INTENT_SLOTS, Map.of(
+                        SlotKeys.ACTION, Map.of(SlotKeys.ACTION_TYPE, "LOGISTICS_QUERY")
+                ))
+        );
+
+        assertThat(state.value(OrderManageStateKeys.ORDER_ACTION, ""))
+                .isEqualTo(OrderManageAction.LOGISTICS_QUERY.name());
+        assertThat(state.value(OrderManageStateKeys.NODE_MESSAGE, ""))
+                .contains("暂未接入真实物流")
+                .contains("ORD-002");
     }
 
     @Test
@@ -243,7 +369,12 @@ class OrderManageSubgraphFactoryTest {
         }
 
         OverAllState invoke(String message) throws Exception {
+            return invoke(message, Map.of());
+        }
+
+        OverAllState invoke(String message, Map<String, Object> extraState) throws Exception {
             Map<String, Object> initialState = new LinkedHashMap<>();
+            initialState.putAll(extraState);
             initialState.put(GuideGraphStateKeys.USER_ID, USER_ID);
             initialState.put(GuideGraphStateKeys.CONVERSATION_ID, CONVERSATION_ID);
             initialState.put(GuideGraphStateKeys.MESSAGE, message);
@@ -414,13 +545,26 @@ class OrderManageSubgraphFactoryTest {
 
     private static final class StubMockOrders implements MockOrderRepository {
         int created;
+        Optional<MockOrderRecord> latest = Optional.empty();
 
         @Override
         public MockOrderRecord create(String orderNo, String userId, String conversationId, Map<String, Object> items,
                                       Map<String, Object> address, BigDecimal totalAmount) {
             created++;
-            return new MockOrderRecord(1L, orderNo, userId, conversationId, items, address, totalAmount,
+            MockOrderRecord record = new MockOrderRecord(1L, orderNo, userId, conversationId, items, address, totalAmount,
                     "CREATED", LocalDateTime.now());
+            latest = Optional.of(record);
+            return record;
+        }
+
+        @Override
+        public Optional<MockOrderRecord> findByOrderNo(String userId, String conversationId, String orderNo) {
+            return latest.filter(record -> record.orderNo().equals(orderNo));
+        }
+
+        @Override
+        public Optional<MockOrderRecord> findLatest(String userId, String conversationId) {
+            return latest;
         }
     }
 }

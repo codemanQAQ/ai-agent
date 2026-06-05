@@ -1,0 +1,21 @@
+{
+  "chunk_count": 1392,
+  "embedding_required_count": 1292,
+  "text_embedding_count": 1192,
+  "image_embedding_count": 100,
+  "by_chunk_type": {
+    "image_embedding": 100,
+    "marketing_description": 100,
+    "official_faq": 439,
+    "product_parent": 100,
+    "product_profile": 100,
+    "review_summary": 100,
+    "user_review": 453
+  },
+  "by_embedding_modality": {
+    "image": 100,
+    "text": 1192
+  },
+  "dataset_root": "C:\\development\\ecommerce_agent_dataset",
+  "output": "C:\\development\\ai-agent\\src\\main\\resources\\db\\ecommerce_offline\\ecom-product-chunks.jsonl"
+}

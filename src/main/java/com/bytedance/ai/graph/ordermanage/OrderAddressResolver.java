@@ -69,6 +69,9 @@ public class OrderAddressResolver {
     }
 
     private String find(Pattern pattern, String value) {
+        if (value == null) {
+            return null;
+        }
         Matcher matcher = pattern.matcher(value);
         return matcher.find() ? matcher.group(1).trim() : null;
     }
@@ -99,15 +102,14 @@ public class OrderAddressResolver {
             result = result.replaceAll("(收货人|联系人|姓名|receiver|name)[:：\\s]*" + Pattern.quote(receiverName), " ");
         }
         result = result
-                .replace("收货地址是", " ")
-                .replace("地址是", " ")
-                .replace("地址：", " ")
-                .replace("地址:", " ")
+                .replaceAll("(?i)(联系电话|电话|手机号码|手机号|手机|tel|phone)[:：\\s]*", " ")
+                .replaceAll("(收货地址|详细地址|地址)\\s*(是|为)?\\s*[:：]?\\s*", " ")
                 .replace("寄到", " ")
                 .replace("送到", " ")
                 .replace("我的地址", " ")
                 .replace(receiverName == null ? "\u0000" : receiverName, " ")
                 .replaceAll("[,，、]+", " ")
+                .replaceAll("\\s+", " ")
                 .trim();
         return result.isBlank() ? null : result;
     }

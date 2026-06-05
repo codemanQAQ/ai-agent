@@ -142,7 +142,7 @@ public class KeywordRagRetriever implements RagRetriever {
 
     private KeywordSearchOutcome doSearch(String question, int topK, int candidateTopK, RagSearchFilter filter) {
         Set<String> tokens = retrievalScorer.extractTokens(question);
-        List<RagChunkSearchView> candidates = indexingChunkQueryFacade.findKeywordCandidates(tokens, candidateTopK);
+        List<RagChunkSearchView> candidates = indexingChunkQueryFacade.findKeywordCandidates(tokens, candidateTopK, filter);
         List<RagRetrievedChunk> results = candidates.stream()
                 .map(row -> toScoredChunk(row, tokens, filter))
                 .filter(scored -> scored.score() > 0)

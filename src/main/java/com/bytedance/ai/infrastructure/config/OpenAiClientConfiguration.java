@@ -62,11 +62,15 @@ public class OpenAiClientConfiguration {
         String trimmed = trimTrailingSlash(value);
         String arkSuffix = "/api/v3/chat/completions";
         String openAiSuffix = "/v1/chat/completions";
+        String deepSeekSuffix = "/chat/completions";
         if (StringUtils.hasText(trimmed) && trimmed.endsWith(arkSuffix)) {
             return trimmed.substring(0, trimmed.length() - arkSuffix.length());
         }
         if (StringUtils.hasText(trimmed) && trimmed.endsWith(openAiSuffix)) {
             return trimmed.substring(0, trimmed.length() - openAiSuffix.length());
+        }
+        if (StringUtils.hasText(trimmed) && trimmed.endsWith(deepSeekSuffix)) {
+            return trimmed.substring(0, trimmed.length() - deepSeekSuffix.length());
         }
         return trimmed;
     }
@@ -152,6 +156,7 @@ public class OpenAiClientConfiguration {
     public ChatClient intentChatClient(
             @Value("${graph.agent.intent-llm.api-key}") String apiKey,
             @Value("${graph.agent.intent-llm.base-url}") String baseUrl,
+            @Value("${graph.agent.intent-llm.completions-path:/chat/completions}") String completionsPath,
             @Value("${graph.agent.intent-llm.model}") String modelName,
             @Value("${graph.agent.intent-llm.temperature:0}") Double temperature,
             @Value("${graph.agent.intent-llm.max-tokens:512}") Integer maxTokens,
@@ -159,17 +164,21 @@ public class OpenAiClientConfiguration {
     ) {
         requireText(apiKey, "graph.agent.intent-llm.api-key");
         requireText(baseUrl, "graph.agent.intent-llm.base-url");
+        requireText(completionsPath, "graph.agent.intent-llm.completions-path");
         requireText(modelName, "graph.agent.intent-llm.model");
 
         OpenAiChatOptions options = OpenAiChatOptions.builder()
                 .model(modelName)
                 .temperature(temperature)
                 .maxTokens(maxTokens)
+                .extraBody(java.util.Map.of(
+                        "thinking", java.util.Map.of("type", "disabled")
+                ))
                 .build();
 
         OpenAiApi openAiApi = OpenAiApi.builder()
                 .baseUrl(chatCompletionsBaseUrl(baseUrl))
-                .completionsPath("/api/v3/chat/completions")
+                .completionsPath(completionsPath)
                 .apiKey(apiKey)
                 .restClientBuilder(RestClient.builder()
                         .requestFactory(new SimpleClientHttpRequestFactory() {{
@@ -184,7 +193,9 @@ public class OpenAiClientConfiguration {
                 .defaultOptions(options)
                 .build();
 
-        log.info("Intent LLM ChatClient configured: model={}, temperature={}, maxTokens={}, timeout={}",
+        log.info("Intent LLM ChatClient configured: baseUrl={}, completionsPath={}, model={}, temperature={}, maxTokens={}, timeout={}",
+                safeBaseUrl(baseUrl),
+                completionsPath,
                 modelName,
                 temperature,
                 maxTokens,

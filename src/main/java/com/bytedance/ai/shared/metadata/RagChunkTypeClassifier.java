@@ -33,7 +33,10 @@ public class RagChunkTypeClassifier {
 
     private static final Set<String> ATTR_KEYWORDS = Set.of("规格", "参数", "属性", "spec", "specs", "specification", "attributes");
     private static final Set<String> DESC_KEYWORDS = Set.of("商品描述", "详情", "介绍", "description", "details");
+    private static final Set<String> MARKETING_KEYWORDS = Set.of("营销描述", "卖点", "marketing", "marketing_description");
+    private static final Set<String> FAQ_KEYWORDS = Set.of("官方 faq", "faq", "问答", "常见问题");
     private static final Set<String> REVIEW_KEYWORDS = Set.of("评论", "用户评价", "reviews", "review");
+    private static final Set<String> REVIEW_SUMMARY_KEYWORDS = Set.of("评价摘要", "评价总结", "review_summary", "review summary");
 
     /**
      * 主分类入口。所有参数允许为 null / 空集合。
@@ -77,20 +80,27 @@ public class RagChunkTypeClassifier {
             // 没有 heading 通常意味着 markdown 主体直接是单段（SpuMarkdownRenderer 渲染异常时才走这里）。
             return chunkIndex == 0 ? RagChunkType.TITLE : RagChunkType.BODY;
         }
-        for (String segment : headingPath) {
-            if (!StringUtils.hasText(segment)) {
-                continue;
-            }
-            String lower = segment.toLowerCase(Locale.ROOT);
-            if (containsAny(lower, ATTR_KEYWORDS)) {
-                return RagChunkType.ATTR;
-            }
-            if (containsAny(lower, DESC_KEYWORDS)) {
-                return RagChunkType.DESC;
-            }
-            if (containsAny(lower, REVIEW_KEYWORDS)) {
-                return RagChunkType.REVIEW;
-            }
+        String headingText = headingPath.stream()
+                .filter(StringUtils::hasText)
+                .map(segment -> segment.toLowerCase(Locale.ROOT))
+                .reduce("", (left, right) -> left + "/" + right);
+        if (containsAny(headingText, ATTR_KEYWORDS)) {
+            return RagChunkType.ATTR;
+        }
+        if (containsAny(headingText, MARKETING_KEYWORDS)) {
+            return RagChunkType.MARKETING_DESCRIPTION;
+        }
+        if (containsAny(headingText, FAQ_KEYWORDS)) {
+            return RagChunkType.OFFICIAL_FAQ;
+        }
+        if (containsAny(headingText, REVIEW_SUMMARY_KEYWORDS)) {
+            return RagChunkType.REVIEW_SUMMARY;
+        }
+        if (containsAny(headingText, REVIEW_KEYWORDS)) {
+            return RagChunkType.USER_REVIEW;
+        }
+        if (containsAny(headingText, DESC_KEYWORDS)) {
+            return RagChunkType.DESC;
         }
         // 仅在 H1 根标题下（headingPath.size()==1）且未命中任何关键词，
         // 视为 SpuMarkdownRenderer 模板里"标题 + 品牌 + 类目 + 价格"那一段，归 TITLE。

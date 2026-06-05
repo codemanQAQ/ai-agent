@@ -1,0 +1,440 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.3.6 Chrome/140.0.7339.249 Electron/38.8.0 Safari/537.36" version="29.3.6">
+  <diagram name="第 1 页" id="aTQDgFjPGF0pYaL0wmGf">
+    <mxGraphModel dx="1238" dy="640" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="bg-input" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=none;opacity=22;" value="" vertex="1">
+          <mxGeometry height="210" width="1860" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-understand" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=none;opacity=22;" value="" vertex="1">
+          <mxGeometry height="330" width="1860" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-recommend" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=none;opacity=22;" value="" vertex="1">
+          <mxGeometry height="250" width="1860" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-crud" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=none;opacity=22;" value="" vertex="1">
+          <mxGeometry height="310" width="1860" y="790" as="geometry" />
+        </mxCell>
+        <mxCell id="bg-output" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=none;opacity=22;" value="" vertex="1">
+          <mxGeometry height="280" width="1860" y="1100" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-input" parent="1" style="text;html=1;strokeColor=#6c8ebf;fillColor=#dae8fc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontStyle=1;fontColor=#000000;" value="输入预处理" vertex="1">
+          <mxGeometry height="70" width="88" x="8" y="75" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-understand" parent="1" style="text;html=1;strokeColor=#82b366;fillColor=#d5e8d4;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontStyle=1;fontColor=#000000;" value="理解层" vertex="1">
+          <mxGeometry height="70" width="88" x="8" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-recommend" parent="1" style="text;html=1;strokeColor=#d6b656;fillColor=#fff2cc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontStyle=1;fontColor=#000000;" value="推荐意图" vertex="1">
+          <mxGeometry height="70" width="88" x="8" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-crud" parent="1" style="text;html=1;strokeColor=#b85450;fillColor=#f8cecc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontStyle=1;fontColor=#000000;" value="业务操作" vertex="1">
+          <mxGeometry height="70" width="88" x="8" y="910" as="geometry" />
+        </mxCell>
+        <mxCell id="lane-output" parent="1" style="text;html=1;strokeColor=#9673a6;fillColor=#e1d5e7;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=13;fontStyle=1;fontColor=#000000;" value="汇合输出" vertex="1">
+          <mxGeometry height="70" width="88" x="8" y="1210" as="geometry" />
+        </mxCell>
+        <mxCell id="node-input" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontColor=#000000;fontSize=12;" value="用户输入" vertex="1">
+          <mxGeometry height="40" width="120" x="835" y="24" as="geometry" />
+        </mxCell>
+        <mxCell id="node-audio" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#000000;fontSize=11;" value="音频" vertex="1">
+          <mxGeometry height="32" width="96" x="300" y="94" as="geometry" />
+        </mxCell>
+        <mxCell id="node-text" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#000000;fontSize=11;" value="文本" vertex="1">
+          <mxGeometry height="32" width="96" x="835" y="94" as="geometry" />
+        </mxCell>
+        <mxCell id="node-image" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#000000;fontSize=11;" value="图片" vertex="1">
+          <mxGeometry height="32" width="96" x="1260" y="94" as="geometry" />
+        </mxCell>
+        <mxCell id="node-asr" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontColor=#000000;fontSize=11;" value="ASR" vertex="1">
+          <mxGeometry height="32" width="96" x="300" y="158" as="geometry" />
+        </mxCell>
+        <mxCell id="node-caption" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#000000;fontSize=11;" value="Caption" vertex="1">
+          <mxGeometry height="32" width="110" x="1198" y="158" as="geometry" />
+        </mxCell>
+        <mxCell id="node-embedding" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#000000;fontSize=11;" value="CLIP Embedding" vertex="1">
+          <mxGeometry height="32" width="132" x="1336" y="158" as="geometry" />
+        </mxCell>
+        <mxCell id="e-input-audio" edge="1" parent="1" source="node-input" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" target="node-audio">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-input-text" edge="1" parent="1" source="node-input" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" target="node-text">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-input-image" edge="1" parent="1" source="node-input" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" target="node-image">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-audio-asr" edge="1" parent="1" source="node-audio" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" target="node-asr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-asr-text" edge="1" parent="1" source="node-asr" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="node-text">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-image-caption" edge="1" parent="1" source="node-image" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" target="node-caption">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-image-embedding" edge="1" parent="1" source="node-image" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" target="node-embedding">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="node-state-store" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#f0e6ff;strokeColor=#7a4fb5;fontColor=#000000;fontSize=9;align=center;verticalAlign=top;spacingTop=4;" value="&lt;b&gt;会话状态 State Store&lt;/b&gt;&lt;hr/&gt;轮次 · 约束槽位&lt;br/&gt;候选商品快照&lt;br/&gt;购物车实时状态&lt;br/&gt;用户偏好记忆" vertex="1">
+          <mxGeometry height="122" width="190" x="1540" y="248" as="geometry" />
+        </mxCell>
+        <mxCell id="node-intent" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#000000;fontSize=11;" value="一次理解&#xA;意图 + 约束 + 追问判断" vertex="1">
+          <mxGeometry height="48" width="230" x="590" y="238" as="geometry" />
+        </mxCell>
+        <mxCell id="node-load-state" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontColor=#000000;" value="加载全局历史状态&#xA;AgentSessionState" vertex="1">
+          <mxGeometry height="48" width="260" x="1120" y="238" as="geometry" />
+        </mxCell>
+        <mxCell id="node-modal-unify" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontColor=#000000;fontSize=11;" value="本轮模态统一&#xA;文本 + Caption + 图片向量引用" vertex="1">
+          <mxGeometry height="50" width="320" x="560" y="332" as="geometry" />
+        </mxCell>
+        <mxCell id="node-scene-route" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontColor=#000000;fontSize=11;" value="场景路由&#xA;大 workflow 分发" vertex="1">
+          <mxGeometry height="62" width="180" x="810" y="452" as="geometry" />
+        </mxCell>
+        <mxCell id="e-text-intent" edge="1" parent="1" source="node-text" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;" target="node-intent">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-loadstate-unify" edge="1" parent="1" source="node-load-state" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;" target="node-state-merge">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-caption-unify" edge="1" parent="1" source="node-caption" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="node-modal-unify">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-embedding-unify" edge="1" parent="1" source="node-embedding" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="node-modal-unify">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="node-state-merge" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontColor=#000000;fontSize=11;" value="状态合并&#xA;历史状态 + 本轮理解 + 本轮模态" vertex="1">
+          <mxGeometry height="50" width="330" x="1000" y="332" as="geometry" />
+        </mxCell>
+        <mxCell id="e-unify-merge" edge="1" parent="1" source="node-modal-unify" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;" target="node-state-merge">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-intent-merge" edge="1" parent="1" source="node-intent" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;" target="node-state-merge">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="e-unify-route" edge="1" parent="1" source="node-state-merge" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#82b366;" target="node-scene-route">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-store-load" edge="1" parent="1" source="node-state-store" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#7a4fb5;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="node-load-state">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="label-store-load" connectable="0" parent="e-store-load" style="edgeLabel;html=1;fontSize=10;fontColor=#7a4fb5;fillColor=none;strokeColor=none;" value="读" vertex="1">
+          <mxGeometry relative="0.25" as="geometry" />
+        </mxCell>
+        <mxCell id="node-sub-route" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontColor=#000000;fontSize=12;arcSize=8;" value="product_recommend_workflow&#xA;推荐策略分发" vertex="1">
+          <mxGeometry height="44" width="430" x="540" y="552" as="geometry" />
+        </mxCell>
+        <mxCell id="e-route-recommend" edge="1" parent="1" source="node-scene-route" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=#d6b656;" target="node-sub-route">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="label-recommend" connectable="0" parent="e-route-recommend" style="edgeLabel;html=1;fontSize=10;fillColor=none;strokeColor=none;" value="7 个推荐子场景" vertex="1">
+          <mxGeometry relative="0.5" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl-a1" parent="1" style="text;html=1;strokeColor=#d6b656;fillColor=#ffe6a0;align=center;verticalAlign=middle;fontStyle=1;fontSize=10;fontColor=#000000;rounded=1;" value="①单轮模糊推荐" vertex="1">
+          <mxGeometry height="22" width="118" x="130" y="612" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a1-s1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="品类/风格抽取" vertex="1">
+          <mxGeometry height="28" width="118" x="130" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a1-s2" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="召回条件检查" vertex="1">
+          <mxGeometry height="28" width="118" x="130" y="676" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a1-s3" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="语义向量检索" vertex="1">
+          <mxGeometry height="28" width="118" x="130" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="e-sub-a1" edge="1" parent="1" source="node-sub-route" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a1-s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a1-12" edge="1" parent="1" source="node-a1-s1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a1-s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a1-23" edge="1" parent="1" source="node-a1-s2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a1-s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl-a2" parent="1" style="text;html=1;strokeColor=#d6b656;fillColor=#ffe6a0;align=center;verticalAlign=middle;fontStyle=1;fontSize=10;fontColor=#000000;rounded=1;" value="②条件筛选" vertex="1">
+          <mxGeometry height="22" width="118" x="260" y="612" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a2-s1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="结构化属性/价格抽取" vertex="1">
+          <mxGeometry height="28" width="118" x="260" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a2-s2" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="过滤条件检查" vertex="1">
+          <mxGeometry height="28" width="118" x="260" y="676" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a2-s3" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="属性过滤+向量检索" vertex="1">
+          <mxGeometry height="28" width="118" x="260" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="e-sub-a2" edge="1" parent="1" source="node-sub-route" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a2-s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a2-12" edge="1" parent="1" source="node-a2-s1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a2-s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a2-23" edge="1" parent="1" source="node-a2-s2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a2-s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl-a3" parent="1" style="text;html=1;strokeColor=#d6b656;fillColor=#ffe6a0;align=center;verticalAlign=middle;fontStyle=1;fontSize=10;fontColor=#000000;rounded=1;" value="③多轮细化" vertex="1">
+          <mxGeometry height="22" width="118" x="390" y="612" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a3-s1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="读取历史状态" vertex="1">
+          <mxGeometry height="28" width="118" x="390" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a3-s2" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="增量约束抽取+合并" vertex="1">
+          <mxGeometry height="28" width="118" x="390" y="676" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a3-s3" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="细化条件检查" vertex="1">
+          <mxGeometry height="28" width="118" x="390" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a3-s4" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="多轮上下文检索" vertex="1">
+          <mxGeometry height="28" width="118" x="390" y="744" as="geometry" />
+        </mxCell>
+        <mxCell id="e-sub-a3" edge="1" parent="1" source="node-sub-route" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a3-s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a3-12" edge="1" parent="1" source="node-a3-s1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a3-s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a3-23" edge="1" parent="1" source="node-a3-s2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a3-s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a3-34" edge="1" parent="1" source="node-a3-s3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a3-s4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl-a4" parent="1" style="text;html=1;strokeColor=#d6b656;fillColor=#ffe6a0;align=center;verticalAlign=middle;fontStyle=1;fontSize=10;fontColor=#000000;rounded=1;" value="④对比决策" vertex="1">
+          <mxGeometry height="22" width="118" x="520" y="612" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a4-s1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="读取历史状态" vertex="1">
+          <mxGeometry height="28" width="118" x="520" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a4-s2" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="双商品实体抽取" vertex="1">
+          <mxGeometry height="28" width="118" x="520" y="676" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a4-s3" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="对比对象检查" vertex="1">
+          <mxGeometry height="28" width="118" x="520" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a4-s4" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="多商品并行检索+对比" vertex="1">
+          <mxGeometry height="28" width="118" x="520" y="744" as="geometry" />
+        </mxCell>
+        <mxCell id="e-sub-a4" edge="1" parent="1" source="node-sub-route" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a4-s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a4-12" edge="1" parent="1" source="node-a4-s1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a4-s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a4-23" edge="1" parent="1" source="node-a4-s2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a4-s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a4-34" edge="1" parent="1" source="node-a4-s3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a4-s4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl-a5" parent="1" style="text;html=1;strokeColor=#d6b656;fillColor=#ffe6a0;align=center;verticalAlign=middle;fontStyle=1;fontSize=10;fontColor=#000000;rounded=1;" value="⑤反选/排除约束" vertex="1">
+          <mxGeometry height="22" width="118" x="650" y="612" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a5-s1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="负向约束抽取" vertex="1">
+          <mxGeometry height="28" width="118" x="650" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a5-s2" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="排除条件检查" vertex="1">
+          <mxGeometry height="28" width="118" x="650" y="676" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a5-s3" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="向量检索+负向过滤" vertex="1">
+          <mxGeometry height="28" width="118" x="650" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="e-sub-a5" edge="1" parent="1" source="node-sub-route" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a5-s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a5-12" edge="1" parent="1" source="node-a5-s1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a5-s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a5-23" edge="1" parent="1" source="node-a5-s2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a5-s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl-a6" parent="1" style="text;html=1;strokeColor=#d6b656;fillColor=#ffe6a0;align=center;verticalAlign=middle;fontStyle=1;fontSize=10;fontColor=#000000;rounded=1;" value="⑥场景化组合推荐" vertex="1">
+          <mxGeometry height="22" width="118" x="780" y="612" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a6-s1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="场景标签抽取" vertex="1">
+          <mxGeometry height="28" width="118" x="780" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a6-s2" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="组合目标检查" vertex="1">
+          <mxGeometry height="28" width="118" x="780" y="676" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a6-s3" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="跨类目多路召回" vertex="1">
+          <mxGeometry height="28" width="118" x="780" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a6-s4" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="组合编排" vertex="1">
+          <mxGeometry height="28" width="118" x="780" y="744" as="geometry" />
+        </mxCell>
+        <mxCell id="e-sub-a6" edge="1" parent="1" source="node-sub-route" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a6-s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a6-12" edge="1" parent="1" source="node-a6-s1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a6-s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a6-23" edge="1" parent="1" source="node-a6-s2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a6-s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a6-34" edge="1" parent="1" source="node-a6-s3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a6-s4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="lbl-a7" parent="1" style="text;html=1;strokeColor=#d6b656;fillColor=#ffe6a0;align=center;verticalAlign=middle;fontStyle=1;fontSize=10;fontColor=#000000;rounded=1;" value="⑦拍照找货（多模态）" vertex="1">
+          <mxGeometry height="22" width="128" x="920" y="612" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a7-s1" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="视觉特征抽取&#xA;← CLIP视觉向量" vertex="1">
+          <mxGeometry height="34" width="128" x="920" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a7-s2" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="图片输入检查" vertex="1">
+          <mxGeometry height="28" width="128" x="920" y="682" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a7-s3" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="文本意图补充" vertex="1">
+          <mxGeometry height="28" width="128" x="920" y="716" as="geometry" />
+        </mxCell>
+        <mxCell id="node-a7-s4" parent="1" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontColor=#000000;" value="视觉向量检索" vertex="1">
+          <mxGeometry height="28" width="128" x="920" y="750" as="geometry" />
+        </mxCell>
+        <mxCell id="e-sub-a7" edge="1" parent="1" source="node-sub-route" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a7-s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-embedding-a7" edge="1" parent="1" source="node-embedding" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#666666;entryX=1;entryY=0;entryDx=0;entryDy=0;" target="node-a7-s1">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="e-a7-12" edge="1" parent="1" source="node-a7-s1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a7-s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a7-23" edge="1" parent="1" source="node-a7-s2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a7-s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a7-34" edge="1" parent="1" source="node-a7-s3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d6b656;" target="node-a7-s4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="node-c-extract" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" value="业务参数抽取&#xA;商品ID / 数量 / 地址等" vertex="1">
+          <mxGeometry height="42" width="210" x="1140" y="825" as="geometry" />
+        </mxCell>
+        <mxCell id="node-c-route" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=10;fontColor=#000000;" value="业务 workflow 分发" vertex="1">
+          <mxGeometry height="56" width="175" x="1158" y="900" as="geometry" />
+        </mxCell>
+        <mxCell id="node-c-cart" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" value="cart_manage_workflow&#xA;加购/删除/修改/查看" vertex="1">
+          <mxGeometry height="52" width="180" x="1040" y="1010" as="geometry" />
+        </mxCell>
+        <mxCell id="node-c-order" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontColor=#000000;" value="order_manage_workflow&#xA;下单/确认/取消/订单查询" vertex="1">
+          <mxGeometry height="52" width="190" x="1280" y="1010" as="geometry" />
+        </mxCell>
+        <mxCell id="e-route-crud" edge="1" parent="1" source="node-scene-route" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#b85450;" target="node-c-extract">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="label-crud" connectable="0" parent="e-route-crud" style="edgeLabel;html=1;fontSize=10;fillColor=none;strokeColor=none;fontColor=#b85450;" value="CART_MANAGE / ORDER_MANAGE" vertex="1">
+          <mxGeometry relative="0.5" as="geometry" />
+        </mxCell>
+        <mxCell id="e-extract-croute" edge="1" parent="1" source="node-c-extract" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#b85450;" target="node-c-route">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-croute-cart" edge="1" parent="1" source="node-c-route" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;strokeColor=#b85450;" target="node-c-cart">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="label-cart" connectable="0" parent="e-croute-cart" style="edgeLabel;html=1;fontSize=9;fillColor=none;strokeColor=none;fontColor=#b85450;" value="CART_MANAGE" vertex="1">
+          <mxGeometry relative="0.75" as="geometry" />
+        </mxCell>
+        <mxCell id="e-croute-order" edge="1" parent="1" source="node-c-route" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;strokeColor=#b85450;" target="node-c-order">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="label-order" connectable="0" parent="e-croute-order" style="edgeLabel;html=1;fontSize=9;fillColor=none;strokeColor=none;fontColor=#b85450;" value="ORDER_MANAGE" vertex="1">
+          <mxGeometry relative="0.75" as="geometry" />
+        </mxCell>
+        <mxCell id="e-store-cextract" edge="1" parent="1" source="node-state-store" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#7a4fb5;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="node-c-extract">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="label-store-cextract" connectable="0" parent="e-store-cextract" style="edgeLabel;html=1;fontSize=9;fontColor=#7a4fb5;fillColor=none;strokeColor=none;" value="读候选商品快照" vertex="1">
+          <mxGeometry relative="0.55" as="geometry" />
+        </mxCell>
+        <mxCell id="node-clarify-workflow" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=10;fontColor=#000000;" value="clarify_workflow&#xA;OTHER / needClarify / 低置信" vertex="1">
+          <mxGeometry height="54" width="210" x="1450" y="604" as="geometry" />
+        </mxCell>
+        <mxCell id="e-route-clarify" edge="1" parent="1" source="node-scene-route" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d79b00;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="node-clarify-workflow">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="label-clarify" connectable="0" parent="e-route-clarify" style="edgeLabel;html=1;fontSize=9;fillColor=none;strokeColor=none;fontColor=#d79b00;" value="OTHER / needClarify" vertex="1">
+          <mxGeometry relative="0.5" as="geometry" />
+        </mxCell>
+        <mxCell id="e-clarify-output" edge="1" parent="1" source="node-clarify-workflow" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#d79b00;" target="node-output">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="node-rrf" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#000000;fontSize=11;" value="RRF 融合 + 负向过滤" vertex="1">
+          <mxGeometry height="36" width="260" x="590" y="1122" as="geometry" />
+        </mxCell>
+        <mxCell id="node-rerank" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#000000;fontSize=11;" value="重排（多样性 + LLM重排序）" vertex="1">
+          <mxGeometry height="36" width="260" x="590" y="1174" as="geometry" />
+        </mxCell>
+        <mxCell id="node-output" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontColor=#000000;fontSize=11;" value="输出（商品卡片 / 操作确认）" vertex="1">
+          <mxGeometry height="38" width="260" x="590" y="1226" as="geometry" />
+        </mxCell>
+        <mxCell id="node-write" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#000000;fontSize=11;" value="终态写回（状态 + 记忆 + 快照）" vertex="1">
+          <mxGeometry height="36" width="260" x="590" y="1312" as="geometry" />
+        </mxCell>
+        <mxCell id="node-feedback" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#000000;fontSize=11;" value="用户行为反馈（点击/加购/跳过）" vertex="1">
+          <mxGeometry height="36" width="260" x="910" y="1312" as="geometry" />
+        </mxCell>
+        <mxCell id="e-rrf-rerank" edge="1" parent="1" source="node-rrf" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-rerank">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-rerank-output" edge="1" parent="1" source="node-rerank" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-output">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-output-write" edge="1" parent="1" source="node-output" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-write">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-output-fb" edge="1" parent="1" source="node-output" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#9673a6;" target="node-feedback">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-fb-write" edge="1" parent="1" source="node-feedback" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-write">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-cart-ss" edge="1" parent="1" source="node-c-cart" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#7a4fb5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="node-state-store">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-cart-ss" connectable="0" parent="e-cart-ss" style="edgeLabel;html=1;fontSize=9;fontColor=#7a4fb5;fillColor=none;strokeColor=none;" value="写购物车状态" vertex="1">
+          <mxGeometry relative="0.1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-ss-ord" edge="1" parent="1" source="node-state-store" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#7a4fb5;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="node-c-order">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="lbl-ss-ord" connectable="0" parent="e-ss-ord" style="edgeLabel;html=1;fontSize=9;fontColor=#7a4fb5;fillColor=none;strokeColor=none;" value="读购物车状态" vertex="1">
+          <mxGeometry relative="0.8" as="geometry" />
+        </mxCell>
+        <mxCell id="e-write-store" edge="1" parent="1" source="node-write" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#7a4fb5;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="node-state-store">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="label-write-store" connectable="0" parent="e-write-store" style="edgeLabel;html=1;fontSize=9;fontColor=#7a4fb5;fillColor=none;strokeColor=none;" value="终态写" vertex="1">
+          <mxGeometry relative="0.08" as="geometry" />
+        </mxCell>
+        <mxCell id="e-write-input" edge="1" parent="1" source="node-write" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;strokeColor=#9673a6;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="node-input">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
+        </mxCell>
+        <mxCell id="e-cart-output" edge="1" parent="1" source="node-c-cart" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#b85450;" target="node-output">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-order-output" edge="1" parent="1" source="node-c-order" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#b85450;" target="node-output">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a1-rrf" edge="1" parent="1" source="node-a1-s3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-rrf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a2-rrf" edge="1" parent="1" source="node-a2-s3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-rrf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a3-rrf" edge="1" parent="1" source="node-a3-s4" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-rrf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a4-rrf" edge="1" parent="1" source="node-a4-s4" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-rrf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a5-rrf" edge="1" parent="1" source="node-a5-s3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-rrf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a6-rrf" edge="1" parent="1" source="node-a6-s4" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-rrf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a7-rrf" edge="1" parent="1" source="node-a7-s4" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#9673a6;" target="node-rrf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

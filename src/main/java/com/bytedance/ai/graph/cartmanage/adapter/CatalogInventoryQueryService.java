@@ -30,25 +30,19 @@ public class CatalogInventoryQueryService implements InventoryQueryService {
             return StockResult.outOfStock(productId, skuId, 0);
         }
 
-        Long spuId = parseId(productId);
-        if (spuId == null) {
-            return StockResult.outOfStock(productId, skuId, 0);
-        }
-
-        CatalogSpuView spu;
-        try {
-            spu = catalogQueryFacade.getSpu(spuId);
-        } catch (RuntimeException ignored) {
-            return StockResult.outOfStock(productId, skuId, 0);
-        }
-
+        // productId/skuId 可能是数字主键，也可能是召回快照里的外部码（如 p_beauty_024 / s_p_beauty_024_1）。
+        // 数字 → 按主键查；非数字 → 按 external_ref / sku_code 查，避免 parseId 失败直接判缺货。
+        CatalogSpuView spu = resolveSpu(productId);
         if (spu == null || !ACTIVE.equalsIgnoreCase(nullToEmpty(spu.status()))) {
             return StockResult.outOfStock(productId, skuId, 0);
         }
 
-        Long skuPrimaryId = parseId(skuId);
-        if (skuPrimaryId != null) {
-            return checkSkuStock(productId, skuId, requestedQuantity, spu.skus(), skuPrimaryId);
+        if (StringUtils.hasText(skuId)) {
+            StockResult bySku = checkSkuStock(productId, skuId, requestedQuantity, spu.skus());
+            if (bySku != null) {
+                return bySku;
+            }
+            // 未匹配到具体 SKU → 回退到 SPU 级库存
         }
 
         int availableQty = spu.stock() == null ? 0 : spu.stock();
@@ -57,18 +51,33 @@ public class CatalogInventoryQueryService implements InventoryQueryService {
                 : StockResult.outOfStock(productId, skuId, availableQty);
     }
 
+    private CatalogSpuView resolveSpu(String productId) {
+        Long spuId = parseId(productId);
+        try {
+            if (spuId != null) {
+                return catalogQueryFacade.getSpu(spuId);
+            }
+            return catalogQueryFacade.findSpuByExternalRef(productId).orElse(null);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    /** 返回 null 表示没匹配到该 SKU（调用方回退到 SPU 库存）。 */
     private StockResult checkSkuStock(
             String productId,
             String skuId,
             int requestedQuantity,
-            List<CatalogSkuView> skus,
-            Long skuPrimaryId
+            List<CatalogSkuView> skus
     ) {
         if (skus == null || skus.isEmpty()) {
-            return StockResult.outOfStock(productId, skuId, 0);
+            return null;
         }
+        Long skuPrimaryId = parseId(skuId);
         return skus.stream()
-                .filter(sku -> sku != null && skuPrimaryId.equals(sku.id()))
+                .filter(sku -> sku != null && (skuPrimaryId != null
+                        ? skuPrimaryId.equals(sku.id())
+                        : skuId.equalsIgnoreCase(sku.skuCode())))
                 .findFirst()
                 .map(sku -> {
                     int availableQty = sku.stock() == null ? 0 : sku.stock();
@@ -77,7 +86,7 @@ public class CatalogInventoryQueryService implements InventoryQueryService {
                             ? StockResult.inStock(productId, skuId, availableQty)
                             : StockResult.outOfStock(productId, skuId, availableQty);
                 })
-                .orElseGet(() -> StockResult.outOfStock(productId, skuId, 0));
+                .orElse(null);
     }
 
     private Long parseId(String value) {

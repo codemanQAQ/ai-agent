@@ -44,6 +44,28 @@ class MainIntentDecisionNormalizerTest {
     }
 
     @Test
+    void preservesNeedClarifyForExecutableIntent() {
+        MainIntentDecision normalized = normalizer.normalize(new MainIntentDecision(
+                MainIntent.FUZZY_RECOMMEND,
+                0.9d,
+                true,
+                false,
+                "product_recommend_workflow",
+                "Need category or scene.",
+                "你想找哪类商品或用于什么场景？",
+                Map.of("positiveConstraints", Map.of("category", "")),
+                List.of("category_or_scene")
+        ));
+
+        assertThat(normalized.intent()).isEqualTo(MainIntent.FUZZY_RECOMMEND);
+        assertThat(normalized.subIntent()).isEqualTo(MainIntent.FUZZY_RECOMMEND.name());
+        assertThat(normalized.needClarify()).isTrue();
+        assertThat(normalized.clarifyQuestion()).isEqualTo("你想找哪类商品或用于什么场景？");
+        assertThat(normalized.targetWorkflow()).isEqualTo("product_recommend_workflow");
+        assertThat(normalized.missingSlots()).containsExactly("category_or_scene");
+    }
+
+    @Test
     void createOrderForcesWriteActionTrue() {
         MainIntentDecision normalized = normalizer.normalize(new MainIntentDecision(
                 MainIntent.CREATE_ORDER,
@@ -70,7 +92,7 @@ class MainIntentDecisionNormalizerTest {
     void targetWorkflowIsRegeneratedByBackend() {
         MainIntentDecision normalized = normalizer.normalize(decision(MainIntent.PRICE_QUERY, 0.9d, false, false, "add_to_cart_workflow"));
 
-        assertThat(normalized.targetWorkflow()).isEqualTo("price_query_workflow");
+        assertThat(normalized.targetWorkflow()).isEqualTo("product_recommend_workflow");
     }
 
     @Test
@@ -87,9 +109,13 @@ class MainIntentDecisionNormalizerTest {
         ));
 
         assertThat(normalized.intent()).isEqualTo(MainIntent.CART_MANAGE);
+        assertThat(normalized.subIntent()).isEqualTo(MainIntent.ADD_TO_CART.name());
         assertThat(normalized.targetWorkflow()).isEqualTo("cart_manage_workflow");
         assertThat(normalized.slots()).containsEntry("cart_action", "ADD");
         assertThat(normalized.slots()).containsEntry("product_name", "轻量通勤双肩包 14 寸防水");
+        Map<?, ?> action = (Map<?, ?>) normalized.slots().get("action");
+        assertThat(action.get("type")).isEqualTo("ADD");
+        assertThat(action.get("targetRef")).isEqualTo("轻量通勤双肩包 14 寸防水");
         assertThat(normalized.slots()).doesNotContainKey("productName");
         assertThat(normalized.missingSlots()).isEmpty();
         assertThat(normalized.needClarify()).isFalse();
@@ -110,9 +136,13 @@ class MainIntentDecisionNormalizerTest {
         ));
 
         assertThat(normalized.intent()).isEqualTo(MainIntent.CART_MANAGE);
+        assertThat(normalized.subIntent()).isEqualTo(MainIntent.REMOVE_FROM_CART.name());
         assertThat(normalized.targetWorkflow()).isEqualTo("cart_manage_workflow");
         assertThat(normalized.slots()).containsEntry("cart_action", "REMOVE");
         assertThat(normalized.slots()).containsEntry("product_ref", "洗面奶");
+        Map<?, ?> action = (Map<?, ?>) normalized.slots().get("action");
+        assertThat(action.get("type")).isEqualTo("REMOVE");
+        assertThat(action.get("targetRef")).isEqualTo("洗面奶");
         assertThat(normalized.missingSlots()).isEmpty();
     }
 
@@ -134,6 +164,37 @@ class MainIntentDecisionNormalizerTest {
         assertThat(normalized.slots()).containsEntry("cart_action", "UPDATE_QUANTITY");
         assertThat(normalized.slots()).containsEntry("cart_item_id", "42");
         assertThat(normalized.slots()).containsEntry("quantity", 3);
+        Map<?, ?> action = (Map<?, ?>) normalized.slots().get("action");
+        assertThat(action.get("type")).isEqualTo("UPDATE_QUANTITY");
+        assertThat(action.get("quantity")).isEqualTo(3);
+    }
+
+    @Test
+    void preservesUnifiedActionObjectWhenProvided() {
+        MainIntentDecision normalized = normalizer.normalize(new MainIntentDecision(
+                MainIntent.CART_MANAGE,
+                0.91d,
+                false,
+                true,
+                "evil",
+                "ADD_TO_CART",
+                "llm reason",
+                null,
+                Map.of("action", Map.of(
+                        "type", "ADD_TO_CART",
+                        "targetRef", "保湿乳",
+                        "quantity", 2
+                )),
+                List.of()
+        ));
+
+        assertThat(normalized.intent()).isEqualTo(MainIntent.CART_MANAGE);
+        assertThat(normalized.subIntent()).isEqualTo("ADD_TO_CART");
+        assertThat(normalized.targetWorkflow()).isEqualTo("cart_manage_workflow");
+        Map<?, ?> action = (Map<?, ?>) normalized.slots().get("action");
+        assertThat(action.get("type")).isEqualTo("ADD_TO_CART");
+        assertThat(action.get("targetRef")).isEqualTo("保湿乳");
+        assertThat(action.get("quantity")).isEqualTo(2);
     }
 
     @Test

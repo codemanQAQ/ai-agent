@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Map;
+import java.util.Optional;
 
 @Repository
 public class JdbcMockOrderRepository implements MockOrderRepository {
@@ -47,6 +48,45 @@ public class JdbcMockOrderRepository implements MockOrderRepository {
                 .addValue("items", toJson(items))
                 .addValue("address", toJson(address))
                 .addValue("totalAmount", totalAmount), rowMapper());
+    }
+
+    @Override
+    public Optional<MockOrderRecord> findByOrderNo(String userId, String conversationId, String orderNo) {
+        if (orderNo == null || orderNo.isBlank()) {
+            return Optional.empty();
+        }
+        String sql = """
+                SELECT *
+                FROM public.mock_orders
+                WHERE user_id = :userId
+                  AND conversation_id = :conversationId
+                  AND order_no = :orderNo
+                ORDER BY created_at DESC
+                LIMIT 1
+                """;
+        return jdbcTemplate.query(sql, new MapSqlParameterSource()
+                        .addValue("userId", userId)
+                        .addValue("conversationId", conversationId)
+                        .addValue("orderNo", orderNo.trim()), rowMapper())
+                .stream()
+                .findFirst();
+    }
+
+    @Override
+    public Optional<MockOrderRecord> findLatest(String userId, String conversationId) {
+        String sql = """
+                SELECT *
+                FROM public.mock_orders
+                WHERE user_id = :userId
+                  AND conversation_id = :conversationId
+                ORDER BY created_at DESC
+                LIMIT 1
+                """;
+        return jdbcTemplate.query(sql, new MapSqlParameterSource()
+                        .addValue("userId", userId)
+                        .addValue("conversationId", conversationId), rowMapper())
+                .stream()
+                .findFirst();
     }
 
     private RowMapper<MockOrderRecord> rowMapper() {

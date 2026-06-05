@@ -15,6 +15,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -97,6 +98,13 @@ public class OrderCommandService {
         }
         pendingRepository.markCreated(pending.id(), orderNo);
         return OrderCreateResult.success(orderNo);
+    }
+
+    public Optional<MockOrderRecord> findOrder(String userId, String conversationId, String orderRef) {
+        if (StringUtils.hasText(orderRef)) {
+            return mockOrderRepository.findByOrderNo(userId, conversationId, orderRef.trim());
+        }
+        return mockOrderRepository.findLatest(userId, conversationId);
     }
 
     private String validateProductsAndDeductStock(CartView cart) {

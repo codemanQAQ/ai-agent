@@ -1,0 +1,22 @@
+services:
+  ecommerce-offline-postgres:
+    image: postgres:16
+    container_name: ecommerce-offline-postgres
+    environment:
+      POSTGRES_DB: ecommerce_offline
+      POSTGRES_USER: ecommerce_user
+      POSTGRES_PASSWORD: ecommerce_password
+    ports:
+      - "54329:5432"
+    volumes:
+      - ecommerce_offline_pgdata:/var/lib/postgresql/data
+      - ./schema-postgres.sql:/docker-entrypoint-initdb.d/01-schema-postgres.sql:ro
+      - ./seed-ecommerce-dataset.sql:/docker-entrypoint-initdb.d/02-seed-ecommerce-dataset.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecommerce_user -d ecommerce_offline"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  ecommerce_offline_pgdata:

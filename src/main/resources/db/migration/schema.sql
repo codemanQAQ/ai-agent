@@ -63,6 +63,15 @@ CREATE INDEX idx_rag_documents_source_type
 CREATE INDEX idx_rag_documents_external_ref
     ON public.rag_documents (external_ref);
 
+CREATE INDEX idx_rag_documents_metadata_product_id
+    ON public.rag_documents ((metadata ->> 'productId'));
+
+CREATE INDEX idx_rag_documents_metadata_spu_id
+    ON public.rag_documents ((metadata ->> 'spuId'));
+
+CREATE INDEX idx_rag_documents_metadata_catalog_spu_id
+    ON public.rag_documents ((metadata ->> 'catalogSpuId'));
+
 CREATE INDEX idx_rag_documents_source_uri
     ON public.rag_documents (source_uri);
 
@@ -274,6 +283,21 @@ CREATE INDEX idx_rag_chunks_vector_id
 
 CREATE INDEX idx_rag_chunks_chunk_hash
     ON public.rag_chunks (chunk_hash);
+
+CREATE INDEX idx_rag_chunks_metadata_chunk_type
+    ON public.rag_chunks ((metadata ->> 'chunkType'));
+
+CREATE INDEX idx_rag_chunks_metadata_product_id
+    ON public.rag_chunks ((metadata ->> 'productId'));
+
+CREATE INDEX idx_rag_chunks_metadata_external_ref
+    ON public.rag_chunks ((metadata ->> 'externalRef'));
+
+CREATE INDEX idx_rag_chunks_metadata_spu_id
+    ON public.rag_chunks ((metadata ->> 'spuId'));
+
+CREATE INDEX idx_rag_chunks_metadata_catalog_spu_id
+    ON public.rag_chunks ((metadata ->> 'catalogSpuId'));
 
 CREATE INDEX idx_rag_chunks_chunk_text_fts
     ON public.rag_chunks
@@ -770,6 +794,25 @@ CREATE INDEX idx_agent_turn_user_conversation_created
 
 CREATE INDEX idx_agent_turn_request_id
     ON public.agent_turn (request_id);
+
+-- =========================================================
+-- Agent session state store
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS public.agent_session_state
+(
+    id              bigserial PRIMARY KEY,
+    user_id         varchar(64)                            NOT NULL,
+    conversation_id varchar(64)                            NOT NULL,
+    state_json      jsonb DEFAULT '{}'::jsonb              NOT NULL,
+    created_at      timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at      timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT uq_agent_session_state_user_conv
+        UNIQUE (user_id, conversation_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_session_state_user_conv
+    ON public.agent_session_state (user_id, conversation_id);
 
 -- ----------------------------------------------------------------------------
 -- cart_manage_subgraph: persisted candidate-selection state across turns.

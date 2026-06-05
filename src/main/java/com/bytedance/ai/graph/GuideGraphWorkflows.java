@@ -12,14 +12,21 @@ public final class GuideGraphWorkflows {
     private static final Map<GuideGraphIntent, String> TARGETS = new EnumMap<>(GuideGraphIntent.class);
 
     static {
+        TARGETS.put(GuideGraphIntent.FUZZY_RECOMMEND, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.CONDITION_FILTER, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.MULTI_TURN_REFINE, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.NEGATIVE_CONSTRAINT, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.SCENE_BUNDLE_RECOMMEND, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.PHOTO_SEARCH, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+
         TARGETS.put(GuideGraphIntent.PRODUCT_RECOMMEND, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.PRODUCT_SEARCH, GuideGraphNodeNames.PRODUCT_SEARCH_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.PRODUCT_COMPARE, GuideGraphNodeNames.PRODUCT_COMPARE_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.PRODUCT_DETAIL_QUERY, GuideGraphNodeNames.PRODUCT_DETAIL_QUERY_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.PRICE_QUERY, GuideGraphNodeNames.PRICE_QUERY_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.INVENTORY_QUERY, GuideGraphNodeNames.INVENTORY_QUERY_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.ORDER_QUERY, GuideGraphNodeNames.ORDER_QUERY_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.LOGISTICS_QUERY, GuideGraphNodeNames.LOGISTICS_QUERY_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.PRODUCT_SEARCH, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.PRODUCT_COMPARE, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.PRODUCT_DETAIL_QUERY, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.PRICE_QUERY, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.INVENTORY_QUERY, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.ORDER_QUERY, GuideGraphNodeNames.ORDER_MANAGE_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.LOGISTICS_QUERY, GuideGraphNodeNames.ORDER_MANAGE_WORKFLOW);
         // All cart-management intents (legacy granular + new unified) route to the single
         // cart_manage_workflow node. The node does its own slot filling (CartManageSlotFillingService)
         // and dispatches internally to view/remove/update-qty/clear branches.
@@ -30,10 +37,12 @@ public final class GuideGraphWorkflows {
         TARGETS.put(GuideGraphIntent.CREATE_ORDER, GuideGraphNodeNames.ORDER_MANAGE_WORKFLOW);
         TARGETS.put(GuideGraphIntent.CONFIRM_ORDER, GuideGraphNodeNames.ORDER_MANAGE_WORKFLOW);
         TARGETS.put(GuideGraphIntent.CANCEL_ORDER, GuideGraphNodeNames.ORDER_MANAGE_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.POLICY_QA, GuideGraphNodeNames.POLICY_QA_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.REVIEW_SUMMARY, GuideGraphNodeNames.REVIEW_SUMMARY_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.ORDER_MANAGE, GuideGraphNodeNames.ORDER_MANAGE_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.POLICY_QA, GuideGraphNodeNames.CLARIFY_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.REVIEW_SUMMARY, GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
         TARGETS.put(GuideGraphIntent.CLARIFY, GuideGraphNodeNames.CLARIFY_WORKFLOW);
-        TARGETS.put(GuideGraphIntent.SMALL_TALK, GuideGraphNodeNames.SMALL_TALK_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.OTHER, GuideGraphNodeNames.CLARIFY_WORKFLOW);
+        TARGETS.put(GuideGraphIntent.SMALL_TALK, GuideGraphNodeNames.CLARIFY_WORKFLOW);
         TARGETS.put(GuideGraphIntent.UNKNOWN, GuideGraphNodeNames.CLARIFY_WORKFLOW);
     }
 

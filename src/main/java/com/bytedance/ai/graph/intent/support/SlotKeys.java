@@ -20,6 +20,14 @@ public final class SlotKeys {
     public static final String QUANTITY = "quantity";
     public static final String CONTEXTUAL_REFERENCE = "contextual_reference";
     public static final String SPEC = "spec";
+    public static final String ACTION = "action";
+    public static final String ACTION_TYPE = "type";
+    public static final String ACTION_TARGET_REF = "targetRef";
+    public static final String ACTION_QUANTITY = "quantity";
+    public static final String ACTION_SKU_SPEC = "skuSpec";
+    public static final String ACTION_SOURCE = "source";
+    public static final String ACTION_ADDRESS_REF = "addressRef";
+    public static final String ACTION_ORDER_REF = "orderRef";
 
     /** Canonical cart_action slot values. */
     public static final String CART_ACTION_ADD = "ADD";

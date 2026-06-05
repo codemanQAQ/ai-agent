@@ -93,10 +93,59 @@ public class RagChunkMetadataHelper {
             }
         }
 
+        if (!matchesAnyText(metadataView.raw().get("externalRef"), filter.externalRefs())) {
+            return false;
+        }
+        if (!matchesAnyText(metadataView.raw().get("productId"), filter.productIds())) {
+            return false;
+        }
+        if (!matchesAnyLong(metadataView.raw().get("spuId"), filter.catalogSpuIds())
+                && !matchesAnyLong(metadataView.raw().get("catalogSpuId"), filter.catalogSpuIds())) {
+            return false;
+        }
+        if (!filter.chunkTypes().isEmpty() && !filter.chunkTypes().contains(metadataView.chunkType())) {
+            return false;
+        }
+
         // mustNotIngredients 在召回阶段不查 chunk content（这里 metadata 不一定带正文），
         // 交给 NegationRerankFilter 在拿到 hit.snippet / SPU description 后做精过滤。
 
         return true;
+    }
+
+    private boolean matchesAnyText(Object value, List<String> allowedValues) {
+        if (allowedValues == null || allowedValues.isEmpty()) {
+            return true;
+        }
+        if (value == null) {
+            return false;
+        }
+        String normalizedValue = normalizeLowerCase(String.valueOf(value));
+        return allowedValues.stream()
+                .map(this::normalizeLowerCase)
+                .anyMatch(normalizedValue::equals);
+    }
+
+    private boolean matchesAnyLong(Object value, List<Long> allowedValues) {
+        if (allowedValues == null || allowedValues.isEmpty()) {
+            return true;
+        }
+        Long normalizedValue = toLong(value);
+        return normalizedValue != null && allowedValues.contains(normalizedValue);
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text && StringUtils.hasText(text)) {
+            try {
+                return Long.parseLong(text.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     public List<String> toStringList(Object value) {

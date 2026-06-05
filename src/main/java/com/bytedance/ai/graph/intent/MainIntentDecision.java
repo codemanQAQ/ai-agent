@@ -9,10 +9,38 @@ public record MainIntentDecision(
         boolean needClarify,
         boolean writeAction,
         String targetWorkflow,
+        String subIntent,
         String reason,
+        String clarifyQuestion,
         Map<String, Object> slots,
         List<String> missingSlots
 ) {
+    public MainIntentDecision(
+            MainIntent intent,
+            double confidence,
+            boolean needClarify,
+            boolean writeAction,
+            String targetWorkflow,
+            String reason,
+            Map<String, Object> slots,
+            List<String> missingSlots
+    ) {
+        this(intent, confidence, needClarify, writeAction, targetWorkflow, null, reason, null, slots, missingSlots);
+    }
+
+    public MainIntentDecision(
+            MainIntent intent,
+            double confidence,
+            boolean needClarify,
+            boolean writeAction,
+            String targetWorkflow,
+            String reason,
+            String clarifyQuestion,
+            Map<String, Object> slots,
+            List<String> missingSlots
+    ) {
+        this(intent, confidence, needClarify, writeAction, targetWorkflow, null, reason, clarifyQuestion, slots, missingSlots);
+    }
 
     public static MainIntentDecision clarify(String reason) {
         return new MainIntentDecision(
@@ -21,7 +49,9 @@ public record MainIntentDecision(
                 true,
                 false,
                 "clarify_workflow",
+                "CLARIFY",
                 reason,
+                null,
                 Map.of(),
                 List.of()
         );

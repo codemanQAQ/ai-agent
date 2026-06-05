@@ -7,6 +7,7 @@ public enum AgentStreamEventType {
     NODE_STARTED,
     NODE_COMPLETED,
     NODE_FAILED,
+    PRODUCT_CARDS,
     ANSWER_DELTA,
     ANSWER_COMPLETED,
     TURN_COMPLETED,

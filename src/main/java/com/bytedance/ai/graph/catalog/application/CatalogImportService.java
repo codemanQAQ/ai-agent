@@ -120,19 +120,32 @@ class CatalogImportService {
         // RagDocumentCreateRequest 强校验 metadata 非空，这里至少塞稳定的可观测字段。
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("spuId", spu.id());
+        metadata.put("catalogSpuId", spu.id());
+        metadata.put("productId", spu.externalRef());
         metadata.put("externalRef", spu.externalRef());
         metadata.put("sourceType", SOURCE_TYPE);
         if (StringUtils.hasText(item.brand())) {
             metadata.put("brand", item.brand());
         }
         if (StringUtils.hasText(item.categoryPath())) {
-            metadata.put("category", item.categoryPath());
+            metadata.put("categoryPath", item.categoryPath());
+            String[] categorySegments = item.categoryPath().split("/", 2);
+            if (StringUtils.hasText(categorySegments[0])) {
+                metadata.put("category", categorySegments[0].trim());
+            }
+            if (categorySegments.length > 1 && StringUtils.hasText(categorySegments[1])) {
+                metadata.put("subCategory", categorySegments[1].trim());
+            }
         }
         if (item.priceMin() != null) {
             metadata.put("priceMin", item.priceMin());
         }
         if (item.priceMax() != null) {
             metadata.put("priceMax", item.priceMax());
+        }
+        metadata.put("stock", item.stock() == null ? 0 : item.stock());
+        if (item.images() != null && !item.images().isEmpty()) {
+            metadata.put("imagePath", item.images().getFirst());
         }
         return metadata;
     }

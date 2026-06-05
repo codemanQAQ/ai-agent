@@ -30,6 +30,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -70,9 +71,9 @@ class GuideGraphStreamServiceTests {
         assertThat(summary.runId()).isEqualTo("run-1");
         assertThat(summary.conversationId()).isEqualTo("c1");
         assertThat(summary.intent()).isEqualTo(GuideGraphIntent.INVENTORY_QUERY);
-        assertThat(summary.targetWorkflow()).isEqualTo(GuideGraphNodeNames.INVENTORY_QUERY_WORKFLOW);
+        assertThat(summary.targetWorkflow()).isEqualTo(GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
         assertThat(summary.status()).isEqualTo(NodeRunStatus.SUCCESS);
-        assertThat(summary.finalNode()).isEqualTo(GuideGraphNodeNames.BUILD_ANSWER_CONTEXT);
+        assertThat(summary.finalNode()).isEqualTo(GuideGraphNodeNames.TERMINAL_STATE_WRITEBACK);
     }
 
     @Test
@@ -117,6 +118,60 @@ class GuideGraphStreamServiceTests {
     }
 
     @Test
+    void productCardsAreStreamedAsStructuredEvent() {
+        StubRepo productRepo = new StubRepo();
+        GuideGraphStreamService productService = new GuideGraphStreamService(new GuideStateGraphFactory(productRepo) {
+            @Override
+            public com.alibaba.cloud.ai.graph.CompiledGraph compile(java.util.function.Consumer<AgentStreamEvent> eventSink) {
+                Map<String, Object> product = new LinkedHashMap<>();
+                product.put("productId", "p1");
+                product.put("title", "清透氨基酸洗面奶");
+                product.put("recommendReason", "适合油皮清洁。");
+                Map<String, Object> workflowResult = new LinkedHashMap<>();
+                workflowResult.put("workflow", GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
+                workflowResult.put("subScene", "FUZZY_RECOMMEND");
+                workflowResult.put("products", List.of(product));
+                workflowResult.put("message", "已为你找到 1 个商品候选。");
+                return compile(eventSink, Map.of(
+                        GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW,
+                        state -> GuideNodeExecutionResult.withStateUpdates(
+                                Map.of(
+                                        GuideGraphStateKeys.WORKFLOW_RESULT, workflowResult,
+                                        GuideGraphStateKeys.NODE_MESSAGE, "已为你找到 1 个商品候选。"
+                                ),
+                                Map.of("override", true)
+                        )
+                ));
+            }
+        }, productRepo);
+        GuideGraphRequest request = new GuideGraphRequest(
+                "u-product",
+                "c-product",
+                "推荐洗面奶",
+                "run-product-1",
+                "req-product-1",
+                null,
+                "corr-product-1",
+                GuideGraphIntent.PRODUCT_SEARCH,
+                List.of()
+        );
+
+        List<AgentStreamEvent> events = productService.turnStream(request).collectList().block();
+
+        assertThat(events).isNotNull();
+        AgentStreamEvent productCards = events.stream()
+                .filter(event -> AgentStreamEventType.PRODUCT_CARDS.eventName().equals(event.event()))
+                .findFirst()
+                .orElseThrow();
+        assertThat((List<?>) productCards.data()).hasSize(1);
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsSubsequence(
+                        AgentStreamEventType.PRODUCT_CARDS.eventName(),
+                        AgentStreamEventType.ANSWER_DELTA.eventName()
+                );
+    }
+
+    @Test
     void fromAgentTurnRequestUsesTurnIdAsRunIdAndDoesNotSeedIntent() {
         AgentTurnRequest turnRequest = new AgentTurnRequest(
                 "u1",
@@ -144,9 +199,9 @@ class GuideGraphStreamServiceTests {
             @Override
             public com.alibaba.cloud.ai.graph.CompiledGraph compile(java.util.function.Consumer<AgentStreamEvent> eventSink) {
                 return compile(eventSink, Map.of(
-                        GuideGraphNodeNames.SEARCH_WORKFLOW,
+                        GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW,
                         state -> {
-                            throw new IllegalStateException("search workflow failed");
+                            throw new IllegalStateException("product recommend workflow failed");
                         }
                 ));
             }
@@ -174,9 +229,9 @@ class GuideGraphStreamServiceTests {
 
         GuideGraphFinalSummary summary = (GuideGraphFinalSummary) events.getLast().data();
         assertThat(summary.status()).isEqualTo(NodeRunStatus.FAILED);
-        assertThat(summary.finalNode()).isEqualTo(GuideGraphNodeNames.SEARCH_WORKFLOW);
+        assertThat(summary.finalNode()).isEqualTo(GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW);
         assertThat(summary.errorCode()).isEqualTo("GUIDE_GRAPH_NODE_FAILED");
-        assertThat(summary.errorMessage()).isEqualTo("search workflow failed");
+        assertThat(summary.errorMessage()).isEqualTo("product recommend workflow failed");
     }
 
     @Test

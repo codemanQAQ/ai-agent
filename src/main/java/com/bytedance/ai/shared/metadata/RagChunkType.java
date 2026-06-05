@@ -21,8 +21,16 @@ public enum RagChunkType {
     ATTR,
     /** 商品长描述切片：故事化卖点、使用说明，召回最常命中。 */
     DESC,
+    /** 电商营销描述切片：商品卖点、适用人群、使用场景。 */
+    MARKETING_DESCRIPTION,
+    /** 官方 FAQ 切片：详情问答优先召回。 */
+    OFFICIAL_FAQ,
     /** 用户评论切片：辅助参考，权重低于 ATTR/DESC。 */
     REVIEW,
+    /** 单条用户评价切片：评价总结、负向过滤优先使用。 */
+    USER_REVIEW,
+    /** 用户评价聚合摘要切片：评分分布、均分、评价数量。 */
+    REVIEW_SUMMARY,
     /** 图像 chunk：由 Doubao-embedding-vision 多模态向量化，与文本共存同一 collection。 */
     IMAGE,
     /** 默认 / 通用 markdown 正文切片：未匹配到具体业务角色时使用。 */

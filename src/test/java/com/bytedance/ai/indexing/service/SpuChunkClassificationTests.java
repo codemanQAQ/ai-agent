@@ -70,6 +70,45 @@ class SpuChunkClassificationTests {
     }
 
     @Test
+    void importedEcommerceKnowledgeMarkdownKeepsStableChunkTypes() {
+        CatalogSpuCreateRequest spu = new CatalogSpuCreateRequest(
+                "p_beauty_001",
+                "清透氨基酸洗面奶",
+                "清透",
+                "美妆护肤/洁面",
+                new BigDecimal("89"),
+                new BigDecimal("89"),
+                100,
+                """
+                        ## 营销描述
+                        温和清洁，适合油皮日常洁面。
+
+                        ## 官方 FAQ
+                        - Q: 是否适合油皮？
+                          A: 适合油皮和混油皮日常使用。
+
+                        ## 用户评价
+                        - 小张（5星）：洗后不紧绷，控油感不错。""",
+                List.of("1_美妆护肤/images/p_beauty_001_live.jpg"),
+                null,
+                List.of(new CatalogSpuCreateRequest.SkuDraft("sku-1", Map.of("容量", "150ml"), new BigDecimal("89"), 100))
+        );
+
+        String markdown = renderer.render(spu);
+        List<RagChunkType> types = chunker.chunk(markdown).stream()
+                .map(c -> classifier.classify("catalog-spu", c.chunkIndex(), c.headingPath(), c.blockMetadata()))
+                .toList();
+
+        assertThat(types)
+                .as("商品数据导入到 rag_documents 后，应稳定生成营销、FAQ、评价等可过滤 chunk type")
+                .contains(
+                        RagChunkType.MARKETING_DESCRIPTION,
+                        RagChunkType.OFFICIAL_FAQ,
+                        RagChunkType.USER_REVIEW
+                );
+    }
+
+    @Test
     void nonCatalogMarkdownStaysBody() {
         String markdown = """
                 # 普通文档标题

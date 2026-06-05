@@ -51,6 +51,51 @@ public final class SlotKeyNormalizer {
         for (Map.Entry<String, Object> entry : camelFallback.entrySet()) {
             snakeFirst.putIfAbsent(entry.getKey(), entry.getValue());
         }
+        addActionObjectIfMissing(snakeFirst);
         return Map.copyOf(snakeFirst);
+    }
+
+    private static void addActionObjectIfMissing(Map<String, Object> slots) {
+        Object existingAction = slots.get(SlotKeys.ACTION);
+        if (existingAction instanceof Map<?, ?>) {
+            return;
+        }
+        Map<String, Object> action = new LinkedHashMap<>();
+        putIfPresent(action, SlotKeys.ACTION_TYPE, slots.get(SlotKeys.CART_ACTION));
+        putIfPresent(action, SlotKeys.ACTION_TARGET_REF, firstNonNull(
+                slots.get(SlotKeys.PRODUCT_REF),
+                slots.get(SlotKeys.PRODUCT_NAME),
+                slots.get(SlotKeys.PRODUCT_ID)
+        ));
+        putIfPresent(action, SlotKeys.ACTION_QUANTITY, slots.get(SlotKeys.QUANTITY));
+        putIfPresent(action, SlotKeys.ACTION_SKU_SPEC, firstNonNull(
+                slots.get(SlotKeys.SPEC),
+                slots.get(SlotKeys.SKU_ID)
+        ));
+        putIfPresent(action, SlotKeys.ACTION_ORDER_REF, firstNonNull(
+                slots.get("orderRef"),
+                slots.get("orderId"),
+                slots.get("pendingOrderId")
+        ));
+        putIfPresent(action, SlotKeys.ACTION_ADDRESS_REF, slots.get("addressRef"));
+        putIfPresent(action, SlotKeys.ACTION_SOURCE, slots.get("source"));
+        if (!action.isEmpty()) {
+            slots.put(SlotKeys.ACTION, Map.copyOf(action));
+        }
+    }
+
+    private static Object firstNonNull(Object... values) {
+        for (Object value : values) {
+            if (value != null && !String.valueOf(value).isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static void putIfPresent(Map<String, Object> target, String key, Object value) {
+        if (value != null && !String.valueOf(value).isBlank()) {
+            target.put(key, value);
+        }
     }
 }

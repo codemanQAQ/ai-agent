@@ -72,6 +72,17 @@ public final class GuideGraphStreamEvents {
         );
     }
 
+    public static AgentStreamEvent productCards(
+            String correlationId,
+            Object products
+    ) {
+        return of(
+                AgentStreamEventType.PRODUCT_CARDS,
+                correlationId,
+                products
+        );
+    }
+
     public static AgentStreamEvent answerCompleted(
             String correlationId,
             String messageId

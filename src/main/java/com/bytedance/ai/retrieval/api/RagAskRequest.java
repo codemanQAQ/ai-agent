@@ -16,6 +16,10 @@ import java.util.List;
  * @param sourceUriPrefix 按来源 URI 前缀过滤
  * @param tags 按文档标签过滤
  * @param headingPathContains 按标题路径关键字过滤
+ * @param externalRefs 按商品 externalRef 限定检索范围
+ * @param productIds 按商品 productId 限定检索范围
+ * @param catalogSpuIds 按 Catalog SPU ID 限定检索范围
+ * @param chunkTypes 按 chunk 类型限定检索范围，如 OFFICIAL_FAQ / USER_REVIEW
  * @param history 对话历史消息列表，供 query compression 使用
  * @param requestId 客户端生成的幂等请求 ID；同一用户同一会话内重复提交时复用既有问答轮次
  */
@@ -32,6 +36,10 @@ public record RagAskRequest(
         String sourceUriPrefix,
         List<String> tags,
         String headingPathContains,
+        List<String> externalRefs,
+        List<String> productIds,
+        List<Long> catalogSpuIds,
+        List<String> chunkTypes,
         List<@Valid RagConversationMessage> history,
         String requestId
 ) {
@@ -45,6 +53,37 @@ public record RagAskRequest(
             String headingPathContains,
             List<@Valid RagConversationMessage> history
     ) {
-        this(userId, conversationId, question, topK, sourceUriPrefix, tags, headingPathContains, history, null);
+        this(userId, conversationId, question, topK, sourceUriPrefix, tags, headingPathContains, null, null, null, history, null);
+    }
+
+    public RagAskRequest(
+            String userId,
+            String conversationId,
+            String question,
+            Integer topK,
+            String sourceUriPrefix,
+            List<String> tags,
+            String headingPathContains,
+            List<@Valid RagConversationMessage> history,
+            String requestId
+    ) {
+        this(userId, conversationId, question, topK, sourceUriPrefix, tags, headingPathContains, null, null, null, history, requestId);
+    }
+
+    public RagAskRequest(
+            String userId,
+            String conversationId,
+            String question,
+            Integer topK,
+            String sourceUriPrefix,
+            List<String> tags,
+            String headingPathContains,
+            List<String> externalRefs,
+            List<String> productIds,
+            List<Long> catalogSpuIds,
+            List<@Valid RagConversationMessage> history,
+            String requestId
+    ) {
+        this(userId, conversationId, question, topK, sourceUriPrefix, tags, headingPathContains, externalRefs, productIds, catalogSpuIds, null, history, requestId);
     }
 }

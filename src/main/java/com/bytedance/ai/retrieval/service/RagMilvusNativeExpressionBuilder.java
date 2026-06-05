@@ -81,6 +81,33 @@ public class RagMilvusNativeExpressionBuilder {
                         + "%\"");
             }
         }
+        if (!filter.externalRefs().isEmpty()) {
+            expressions.add(MilvusVectorStore.METADATA_FIELD_NAME
+                    + "[\"externalRef\"] in "
+                    + toJsonArray(filter.externalRefs()));
+        }
+        if (!filter.productIds().isEmpty()) {
+            expressions.add(MilvusVectorStore.METADATA_FIELD_NAME
+                    + "[\"productId\"] in "
+                    + toJsonArray(filter.productIds()));
+        }
+        if (!filter.catalogSpuIds().isEmpty()) {
+            String catalogSpuIds = jsonCodec.write(filter.catalogSpuIds());
+            expressions.add("("
+                    + MilvusVectorStore.METADATA_FIELD_NAME
+                    + "[\"spuId\"] in "
+                    + catalogSpuIds
+                    + " OR "
+                    + MilvusVectorStore.METADATA_FIELD_NAME
+                    + "[\"catalogSpuId\"] in "
+                    + catalogSpuIds
+                    + ")");
+        }
+        if (!filter.chunkTypes().isEmpty()) {
+            expressions.add(MilvusVectorStore.METADATA_FIELD_NAME
+                    + "[\"chunkType\"] in "
+                    + toJsonArray(filter.chunkTypes().stream().map(Enum::name).toList()));
+        }
 
         if (expressions.isEmpty()) {
             return null;

@@ -9,6 +9,7 @@ import com.bytedance.ai.retrieval.service.*;
 import com.bytedance.ai.retrieval.support.RagRequestFeedbacks;
 import com.bytedance.ai.shared.metadata.RagChunkMetadataHelper;
 import com.bytedance.ai.shared.metadata.RagChunkMetadataView;
+import com.bytedance.ai.shared.metadata.RagChunkType;
 import com.bytedance.ai.shared.metadata.RagSearchFilter;
 import com.bytedance.ai.shared.properties.RagProperties;
 import com.bytedance.ai.shared.support.RagLogFields;
@@ -85,7 +86,14 @@ class RagAskService implements RagAskFacade {
             RagSearchFilter filter = RagSearchFilter.of(
                     request.sourceUriPrefix(),
                     request.tags(),
-                    request.headingPathContains()
+                    request.headingPathContains(),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    request.externalRefs(),
+                    request.productIds(),
+                    request.catalogSpuIds(),
+                    parseChunkTypes(request.chunkTypes())
             );
             RagConversationService.AskConversationState conversationState = conversationService.beginAsk(
                     runId,
@@ -200,9 +208,24 @@ class RagAskService implements RagAskFacade {
                 request.sourceUriPrefix(),
                 request.tags(),
                 request.headingPathContains(),
+                request.externalRefs(),
+                request.productIds(),
+                request.catalogSpuIds(),
+                request.chunkTypes(),
                 history,
                 request.requestId()
         );
+    }
+
+    private List<RagChunkType> parseChunkTypes(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(RagChunkType::parseOrBody)
+                .distinct()
+                .toList();
     }
 
     private Flux<RagAskStreamEvent> replayExistingAsk(

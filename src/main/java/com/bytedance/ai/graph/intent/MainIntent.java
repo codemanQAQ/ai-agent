@@ -2,6 +2,13 @@ package com.bytedance.ai.graph.intent;
 
 public enum MainIntent {
 
+    FUZZY_RECOMMEND,
+    CONDITION_FILTER,
+    MULTI_TURN_REFINE,
+    NEGATIVE_CONSTRAINT,
+    SCENE_BUNDLE_RECOMMEND,
+    PHOTO_SEARCH,
+
     PRODUCT_RECOMMEND,
     PRODUCT_SEARCH,
     PRODUCT_COMPARE,
@@ -19,11 +26,13 @@ public enum MainIntent {
     CREATE_ORDER,
     CONFIRM_ORDER,
     CANCEL_ORDER,
+    ORDER_MANAGE,
 
     POLICY_QA,
     REVIEW_SUMMARY,
 
     CLARIFY,
+    OTHER,
     SMALL_TALK,
     UNKNOWN
 }

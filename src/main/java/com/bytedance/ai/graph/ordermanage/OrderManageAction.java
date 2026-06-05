@@ -5,5 +5,7 @@ public enum OrderManageAction {
     PROVIDE_ADDRESS,
     CONFIRM_ORDER,
     CANCEL_ORDER,
+    ORDER_QUERY,
+    LOGISTICS_QUERY,
     UNKNOWN
 }

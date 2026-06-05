@@ -4,6 +4,7 @@ import com.bytedance.ai.indexing.api.IndexingChunkQueryFacade;
 import com.bytedance.ai.indexing.api.RagChunkSearchView;
 import com.bytedance.ai.indexing.persistence.RagChunkRepository;
 import com.bytedance.ai.indexing.persistence.RagChunkSearchRecord;
+import com.bytedance.ai.shared.metadata.RagSearchFilter;
 import java.util.List;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,13 @@ class IndexingChunkQueryService implements IndexingChunkQueryFacade {
     @Override
     public List<RagChunkSearchView> findKeywordCandidates(Set<String> tokens, int limit) {
         return chunkRepository.findKeywordCandidates(tokens, limit).stream()
+                .map(this::toView)
+                .toList();
+    }
+
+    @Override
+    public List<RagChunkSearchView> findKeywordCandidates(Set<String> tokens, int limit, RagSearchFilter filter) {
+        return chunkRepository.findKeywordCandidates(tokens, limit, filter).stream()
                 .map(this::toView)
                 .toList();
     }

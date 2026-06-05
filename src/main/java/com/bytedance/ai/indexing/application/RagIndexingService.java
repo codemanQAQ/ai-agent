@@ -379,8 +379,10 @@ public class RagIndexingService {
         metadata.put("indexGeneration", indexGeneration);
         metadata.put("sourceType", document.sourceType());
         metadata.put("sourceUri", defaultString(document.sourceUri()));
+        metadata.put("externalRef", defaultString(document.externalRef()));
         metadata.put("chunkIndex", chunk.chunkIndex());
         metadata.put("blockType", chunk.blockType());
+        copyFilterableDocumentMetadata(document, metadata);
         if (documentTags != null && !documentTags.isEmpty()) {
             metadata.put("documentTags", new ArrayList<>(documentTags));
         }
@@ -403,6 +405,7 @@ public class RagIndexingService {
                 chunk.blockMetadata()
         );
         metadata.put("chunkType", chunkType.name());
+        metadata.put("contentSummary", abbreviate(chunk.text()));
         return new RagChunkDraft(
                 indexGeneration,
                 chunk.chunkIndex(),
@@ -413,6 +416,34 @@ public class RagIndexingService {
                 vectorId,
                 metadata
         );
+    }
+
+    private void copyFilterableDocumentMetadata(DocumentIndexingView document, Map<String, Object> metadata) {
+        Map<String, Object> documentMetadata = document.metadata();
+        putIfPresent(metadata, "spuId", documentMetadata == null ? null : documentMetadata.get("spuId"));
+        putIfPresent(metadata, "catalogSpuId", documentMetadata == null ? null : documentMetadata.get("catalogSpuId"));
+        putIfPresent(metadata, "productId", firstNonNull(
+                documentMetadata == null ? null : documentMetadata.get("productId"),
+                document.externalRef()
+        ));
+        putIfPresent(metadata, "brand", documentMetadata == null ? null : documentMetadata.get("brand"));
+        putIfPresent(metadata, "category", documentMetadata == null ? null : documentMetadata.get("category"));
+        putIfPresent(metadata, "subCategory", documentMetadata == null ? null : documentMetadata.get("subCategory"));
+        putIfPresent(metadata, "categoryPath", documentMetadata == null ? null : documentMetadata.get("categoryPath"));
+        putIfPresent(metadata, "priceMin", documentMetadata == null ? null : documentMetadata.get("priceMin"));
+        putIfPresent(metadata, "priceMax", documentMetadata == null ? null : documentMetadata.get("priceMax"));
+        putIfPresent(metadata, "stock", documentMetadata == null ? null : documentMetadata.get("stock"));
+        putIfPresent(metadata, "imagePath", documentMetadata == null ? null : documentMetadata.get("imagePath"));
+    }
+
+    private Object firstNonNull(Object first, Object second) {
+        return first != null ? first : second;
+    }
+
+    private void putIfPresent(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
     }
 
     private String buildStableVectorId(Long documentId, int chunkIndex) {

@@ -10,8 +10,10 @@ import com.bytedance.ai.graph.api.GuideGraphFinalSummary;
 import com.bytedance.ai.graph.api.GuideGraphRequest;
 import com.bytedance.ai.graph.api.GuideGraphStreamFacade;
 import com.bytedance.ai.graph.api.NodeRunStatus;
+import com.bytedance.ai.graph.input.GuideInputPreprocessor;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.util.StringUtils;
@@ -33,9 +35,19 @@ import java.util.UUID;
 public class GuideAgentTurnController {
 
     private final GuideGraphStreamFacade graphStreamFacade;
+    private final GuideInputPreprocessor inputPreprocessor;
 
     public GuideAgentTurnController(GuideGraphStreamFacade graphStreamFacade) {
+        this(graphStreamFacade, new GuideInputPreprocessor());
+    }
+
+    @Autowired
+    public GuideAgentTurnController(
+            GuideGraphStreamFacade graphStreamFacade,
+            GuideInputPreprocessor inputPreprocessor
+    ) {
         this.graphStreamFacade = graphStreamFacade;
+        this.inputPreprocessor = inputPreprocessor;
     }
 
     @GetMapping(value = "/turn", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -45,7 +57,9 @@ public class GuideAgentTurnController {
             @RequestParam @NotBlank @Size(max = 2000) String message,
             @RequestParam(required = false) @Size(max = 64) String turnId,
             @RequestParam(required = false) @Size(max = 64) String requestId,
-            @RequestParam(required = false) @Size(max = 64) String imageRef,
+            @RequestParam(required = false) @Size(max = 2048) String imageRef,
+            @RequestParam(required = false) @Size(max = 1000) String imageCaption,
+            @RequestParam(required = false) @Size(max = 512) String imageEmbeddingRef,
             @RequestParam(required = false) @Size(max = 16) String streamMode
     ) {
         String actualTurnId = StringUtils.hasText(turnId) ? turnId : UUID.randomUUID().toString();
@@ -59,10 +73,12 @@ public class GuideAgentTurnController {
                 actualTurnId,
                 actualRequestId,
                 imageRef,
+                imageCaption,
+                imageEmbeddingRef,
                 List.of()
         );
 
-        GuideGraphRequest graphRequest = GuideGraphRequest.from(request);
+        GuideGraphRequest graphRequest = inputPreprocessor.toGraphRequest(request);
 
         return graphStreamFacade.turnStream(graphRequest)
                 .map(event -> toSse(event, graphRequest, actualStreamMode))
@@ -89,6 +105,9 @@ public class GuideAgentTurnController {
         }
         if (AgentStreamEventType.ANSWER_DELTA.eventName().equals(eventName)) {
             return Optional.of(rawSse(eventName, event, new ProdAnswerDeltaPayload(answerText(event.data()))));
+        }
+        if (AgentStreamEventType.PRODUCT_CARDS.eventName().equals(eventName)) {
+            return Optional.of(rawSse(eventName, event, event.data()));
         }
         if (AgentStreamEventType.ANSWER_COMPLETED.eventName().equals(eventName)) {
             return Optional.of(rawSse(eventName, event, new ProdAnswerCompletedPayload(messageId(event.data()))));

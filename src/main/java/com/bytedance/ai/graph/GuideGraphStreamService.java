@@ -28,6 +28,7 @@ public class GuideGraphStreamService implements GuideGraphStreamFacade {
 
     private final GuideStateGraphFactory graphFactory;
     private final AgentConversationRepository conversationRepository;
+    private final com.bytedance.ai.graph.productrecommend.ProductRecommendationAnswerGenerator answerGenerator;
 
     public GuideGraphStreamService(
             GuideStateGraphFactory graphFactory,
@@ -35,6 +36,19 @@ public class GuideGraphStreamService implements GuideGraphStreamFacade {
     ) {
         this.graphFactory = graphFactory;
         this.conversationRepository = conversationRepository;
+        this.answerGenerator = null;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public GuideGraphStreamService(
+            GuideStateGraphFactory graphFactory,
+            AgentConversationRepository conversationRepository,
+            org.springframework.beans.factory.ObjectProvider<
+                    com.bytedance.ai.graph.productrecommend.ProductRecommendationAnswerGenerator> answerGeneratorProvider
+    ) {
+        this.graphFactory = graphFactory;
+        this.conversationRepository = conversationRepository;
+        this.answerGenerator = answerGeneratorProvider.getIfAvailable();
     }
 
     @Override
@@ -76,20 +90,11 @@ public class GuideGraphStreamService implements GuideGraphStreamFacade {
                                         recoverableError(summary.errorCode())
                                 ));
                             } else {
-                                answerText(finalState).ifPresent(answer -> {
-                                    String streamAnswer = statusConsistentAnswer(summary, answer);
-                                    String messageId = saveAssistantMessage(request, streamAnswer, "SUCCEEDED");
-                                    emitNext(eventSink, GuideGraphStreamEvents.answerDelta(
-                                            request.correlationId(),
-                                            streamAnswer
-                                    ));
-                                    if (messageId != null) {
-                                        emitNext(eventSink, GuideGraphStreamEvents.answerCompleted(
-                                                request.correlationId(),
-                                                messageId
-                                        ));
-                                    }
-                                });
+                                productCards(finalState).ifPresent(products -> emitNext(eventSink, GuideGraphStreamEvents.productCards(
+                                        request.correlationId(),
+                                        products
+                                )));
+                                emitAnswer(eventSink, request, summary, finalState);
                             }
 
                             emitNext(eventSink, GuideGraphStreamEvents.turnCompleted(
@@ -136,6 +141,75 @@ public class GuideGraphStreamService implements GuideGraphStreamFacade {
         sink.emitNext(event, Sinks.EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
     }
 
+    /**
+     * 发射最终答案：商品推荐且有候选商品时，逐 token 流式发 answer.delta（首字亚秒级）；
+     * 其它情况（或流式不可用/失败）回退为原来的单次 delta。
+     */
+    private void emitAnswer(
+            Sinks.Many<AgentStreamEvent> sink,
+            GuideGraphRequest request,
+            GuideGraphFinalSummary summary,
+            OverAllState finalState
+    ) {
+        Map<String, Object> answerContext = answerContextMap(finalState);
+        String targetWorkflow = finalState.value(GuideGraphStateKeys.TARGET_WORKFLOW, "");
+        boolean streamable = answerGenerator != null
+                && GuideGraphNodeNames.PRODUCT_RECOMMEND_WORKFLOW.equals(targetWorkflow)
+                && summary.status() != NodeRunStatus.FAILED
+                && hasProducts(answerContext);
+
+        if (streamable) {
+            String fallback = answerText(finalState).orElse("");
+            StringBuilder full = new StringBuilder();
+            try {
+                for (String chunk : answerGenerator.generateStream(answerContext, fallback).toIterable()) {
+                    if (chunk != null && !chunk.isEmpty()) {
+                        full.append(chunk);
+                        emitNext(sink, GuideGraphStreamEvents.answerDelta(request.correlationId(), chunk));
+                    }
+                }
+            } catch (Exception exception) {
+                log.warn("streaming recommendation answer failed, fallback used: {}", exception.getMessage());
+            }
+            String finalAnswer = full.length() > 0 ? full.toString().trim() : fallback;
+            if (full.length() == 0 && org.springframework.util.StringUtils.hasText(finalAnswer)) {
+                // 流式没产出（失败/空）→ 把确定性兜底文案作为单次 delta 补发
+                emitNext(sink, GuideGraphStreamEvents.answerDelta(request.correlationId(), finalAnswer));
+            }
+            if (org.springframework.util.StringUtils.hasText(finalAnswer)) {
+                String messageId = saveAssistantMessage(request, finalAnswer, "SUCCEEDED");
+                if (messageId != null) {
+                    emitNext(sink, GuideGraphStreamEvents.answerCompleted(request.correlationId(), messageId));
+                }
+            }
+            return;
+        }
+
+        // 非商品推荐 / 无候选：保持原单次 delta 行为
+        answerText(finalState).ifPresent(answer -> {
+            String streamAnswer = statusConsistentAnswer(summary, answer);
+            String messageId = saveAssistantMessage(request, streamAnswer, "SUCCEEDED");
+            emitNext(sink, GuideGraphStreamEvents.answerDelta(request.correlationId(), streamAnswer));
+            if (messageId != null) {
+                emitNext(sink, GuideGraphStreamEvents.answerCompleted(request.correlationId(), messageId));
+            }
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> answerContextMap(OverAllState state) {
+        Object answerContext = state.value(GuideGraphStateKeys.ANSWER_CONTEXT).orElse(null);
+        if (answerContext instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+        return Map.of();
+    }
+
+    private boolean hasProducts(Map<String, Object> answerContext) {
+        Object products = answerContext.get("products");
+        return products instanceof List<?> list && !list.isEmpty();
+    }
+
     private Map<String, Object> initialState(GuideGraphRequest request) {
         Map<String, Object> state = new LinkedHashMap<>();
         state.put(GuideGraphStateKeys.USER_ID, request.userId());
@@ -144,6 +218,10 @@ public class GuideGraphStreamService implements GuideGraphStreamFacade {
         state.put(GuideGraphStateKeys.RUN_ID, request.runId());
         state.put(GuideGraphStateKeys.REQUEST_ID, request.requestId());
         state.put(GuideGraphStateKeys.IMAGE_REF, request.imageRef());
+        state.put(GuideGraphStateKeys.ORIGINAL_MESSAGE, request.originalMessage());
+        state.put(GuideGraphStateKeys.INPUT_MODALITIES, request.inputModalities());
+        state.put(GuideGraphStateKeys.IMAGE_CAPTION, request.imageCaption());
+        state.put(GuideGraphStateKeys.IMAGE_EMBEDDING_REF, request.imageEmbeddingRef());
         state.put(GuideGraphStateKeys.CORRELATION_ID, request.correlationId());
         if (request.initialIntent() != null) {
             state.put(GuideGraphStateKeys.INITIAL_INTENT, request.initialIntent().name());
@@ -166,6 +244,18 @@ public class GuideGraphStreamService implements GuideGraphStreamFacade {
             return state.value(CartGraphStateKeys.NODE_MESSAGE)
                     .map(Object::toString)
                     .filter(value -> !value.isBlank());
+        }
+        return java.util.Optional.empty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.Optional<Object> productCards(OverAllState state) {
+        Object answerContext = state.value(GuideGraphStateKeys.ANSWER_CONTEXT).orElse(null);
+        if (answerContext instanceof Map<?, ?> map) {
+            Object products = map.get("products");
+            if (products instanceof List<?> list && !list.isEmpty()) {
+                return java.util.Optional.of(products);
+            }
         }
         return java.util.Optional.empty();
     }

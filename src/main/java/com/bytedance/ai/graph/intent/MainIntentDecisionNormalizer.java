@@ -20,21 +20,24 @@ public class MainIntentDecisionNormalizer {
         }
         Map<String, Object> slots = SlotKeyNormalizer.normalize(raw.slots());
         List<String> missingSlots = raw.missingSlots() == null ? List.of() : List.copyOf(raw.missingSlots());
-        MainIntent intent = raw.intent() == null ? MainIntent.UNKNOWN : raw.intent();
+        MainIntent intent = raw.intent() == null ? MainIntent.OTHER : raw.intent();
         double confidence = clamp(raw.confidence());
         if (confidence < MIN_CONFIDENCE) {
             intent = MainIntent.CLARIFY;
         }
         List<String> normalizedMissingSlots = normalizeMissingSlots(intent, slots, missingSlots);
+        String subIntent = normalizeSubIntent(raw.subIntent(), intent);
 
         // Legacy granular cart intents are fully rewritten to CART_MANAGE before reaching the
         // workflow layer. The original action lives on as the `cart_action` slot so the
         // cart_manage_workflow's slot merger can dispatch without re-asking the LLM.
         String legacyCartAction = legacyCartActionOf(intent);
         if (legacyCartAction != null) {
+            subIntent = intent.name();
             intent = MainIntent.CART_MANAGE;
             Map<String, Object> withCartAction = new LinkedHashMap<>(slots);
             withCartAction.putIfAbsent(SlotKeys.CART_ACTION, legacyCartAction);
+            withCartAction.put(SlotKeys.ACTION, actionWithType(slots.get(SlotKeys.ACTION), legacyCartAction));
             slots = Map.copyOf(withCartAction);
             // CART_MANAGE is not in requiresKeySlots — the workflow itself decides whether to
             // ask for clarification, so drop any main-intent missingSlots judgement that was
@@ -42,9 +45,11 @@ public class MainIntentDecisionNormalizer {
             normalizedMissingSlots = List.of();
         }
 
-        boolean needClarify = intent == MainIntent.CLARIFY
+        boolean needClarify = raw.needClarify()
+                || intent == MainIntent.CLARIFY
+                || intent == MainIntent.OTHER
                 || intent == MainIntent.UNKNOWN
-                || (!normalizedMissingSlots.isEmpty() && requiresKeySlots(intent));
+                || !normalizedMissingSlots.isEmpty();
         boolean writeAction = isWriteAction(intent);
         return new MainIntentDecision(
                 intent,
@@ -52,10 +57,22 @@ public class MainIntentDecisionNormalizer {
                 needClarify,
                 writeAction,
                 MainIntentWorkflowMapping.targetWorkflowOf(intent),
+                subIntent,
                 raw.reason() == null ? "" : raw.reason(),
+                raw.clarifyQuestion() == null ? null : raw.clarifyQuestion().trim(),
                 slots,
                 normalizedMissingSlots
         );
+    }
+
+    private String normalizeSubIntent(String rawSubIntent, MainIntent intent) {
+        if (rawSubIntent != null && !rawSubIntent.isBlank()) {
+            return rawSubIntent.trim();
+        }
+        if (intent == null) {
+            return MainIntent.OTHER.name();
+        }
+        return intent.name();
     }
 
     private List<String> normalizeMissingSlots(MainIntent intent, Map<String, Object> slots, List<String> missingSlots) {
@@ -94,6 +111,19 @@ public class MainIntentDecisionNormalizer {
         };
     }
 
+    private Map<String, Object> actionWithType(Object existingAction, String actionType) {
+        Map<String, Object> action = new LinkedHashMap<>();
+        if (existingAction instanceof Map<?, ?> existingMap) {
+            for (Map.Entry<?, ?> entry : existingMap.entrySet()) {
+                if (entry.getKey() != null) {
+                    action.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
+        }
+        action.putIfAbsent(SlotKeys.ACTION_TYPE, actionType);
+        return Map.copyOf(action);
+    }
+
     private void requireAny(Map<String, Object> slots, List<String> missingSlots, String... keys) {
         for (String key : keys) {
             Object value = slots.get(key);
@@ -116,7 +146,7 @@ public class MainIntentDecisionNormalizer {
     private boolean isWriteAction(MainIntent intent) {
         return switch (intent) {
             case ADD_TO_CART, REMOVE_FROM_CART, UPDATE_CART_ITEM, CART_MANAGE,
-                 CREATE_ORDER, CONFIRM_ORDER, CANCEL_ORDER -> true;
+                 CREATE_ORDER, CONFIRM_ORDER, CANCEL_ORDER, ORDER_MANAGE -> true;
             default -> false;
         };
     }

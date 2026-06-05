@@ -3,6 +3,7 @@ package com.bytedance.ai.indexing.persistence;
 import com.bytedance.ai.indexing.persistence.RagChunkRecord;
 import com.bytedance.ai.indexing.persistence.RagChunkSearchRecord;
 import com.bytedance.ai.indexing.model.RagChunkDraft;
+import com.bytedance.ai.shared.metadata.RagSearchFilter;
 import java.util.List;
 import java.util.Set;
 
@@ -65,6 +66,10 @@ public interface RagChunkRepository {
      * 进行关键词候选召回，为混合检索提供文本侧结果。
      */
     List<RagChunkSearchRecord> findKeywordCandidates(Set<String> tokens, int limit);
+
+    default List<RagChunkSearchRecord> findKeywordCandidates(Set<String> tokens, int limit, RagSearchFilter filter) {
+        return findKeywordCandidates(tokens, limit);
+    }
 
     /**
      * 按文档和 chunk 序号范围查询当前可检索的切片窗口。

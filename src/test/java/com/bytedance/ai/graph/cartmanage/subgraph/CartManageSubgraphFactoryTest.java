@@ -13,9 +13,16 @@ import com.bytedance.ai.graph.cartmanage.ProductCandidate;
 import com.bytedance.ai.graph.cartmanage.ProductCatalogResolver;
 import com.bytedance.ai.graph.cartmanage.StockResult;
 import com.bytedance.ai.graph.intent.support.SlotKeys;
+import com.bytedance.ai.graph.session.AgentSessionState;
+import com.bytedance.ai.graph.session.CandidateSnapshot;
+import com.bytedance.ai.graph.session.LastRecommendationResult;
+import com.bytedance.ai.graph.session.MultimodalState;
+import com.bytedance.ai.graph.session.OrderState;
+import com.bytedance.ai.graph.session.RecommendationState;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -94,6 +101,61 @@ class CartManageSubgraphFactoryTest {
         assertThat(command.addedProductId).isEqualTo("101");
         assertThat(command.addedSkuId).isEqualTo("SKU-1");
         assertThat(command.addedQuantity).isEqualTo(2);
+        assertThat(state.value(CartGraphStateKeys.WORKFLOW_STATUS, ""))
+                .isEqualTo(CartWorkflowStatus.ADD_SUCCESS.name());
+    }
+
+    @Test
+    void directAddUsesUnifiedActionSlotsFirst() throws Exception {
+        StubCartCommand command = new StubCartCommand();
+
+        OverAllState state = invoke(
+                "加入购物车",
+                Map.of(SlotKeys.ACTION, Map.of(
+                        SlotKeys.ACTION_TYPE, "ADD_TO_CART",
+                        SlotKeys.ACTION_TARGET_REF, "苹果",
+                        SlotKeys.ACTION_SKU_SPEC, "SKU-1",
+                        SlotKeys.ACTION_QUANTITY, 2
+                )),
+                CartManageSlots.unknown("unused"),
+                cart(),
+                new StubCatalog(candidate("101", "SKU-1", "红富士苹果")),
+                StockMode.IN_STOCK,
+                new StubPendingRepository(),
+                command
+        );
+
+        assertThat(command.addedProductId).isEqualTo("101");
+        assertThat(command.addedSkuId).isEqualTo("SKU-1");
+        assertThat(command.addedQuantity).isEqualTo(2);
+        assertThat(state.value(CartGraphStateKeys.WORKFLOW_STATUS, ""))
+                .isEqualTo(CartWorkflowStatus.ADD_SUCCESS.name());
+    }
+
+    @Test
+    void directAddResolvesTargetRefFromCandidateSnapshot() throws Exception {
+        StubCartCommand command = new StubCartCommand();
+        AgentSessionState sessionState = sessionStateWithCandidates("101", "102");
+
+        OverAllState state = invoke(
+                "把刚才第二个加入购物车",
+                Map.of(SlotKeys.ACTION, Map.of(
+                        SlotKeys.ACTION_TYPE, "ADD_TO_CART",
+                        SlotKeys.ACTION_TARGET_REF, "刚才第二个",
+                        SlotKeys.ACTION_SKU_SPEC, "SKU-2",
+                        SlotKeys.ACTION_QUANTITY, 1
+                )),
+                CartManageSlots.unknown("unused"),
+                cart(),
+                ProductCatalogResolver.empty(),
+                StockMode.IN_STOCK,
+                new StubPendingRepository(),
+                command,
+                Map.of(GuideGraphStateKeys.AGENT_SESSION_STATE, sessionState)
+        );
+
+        assertThat(command.addedProductId).isEqualTo("102");
+        assertThat(command.addedSkuId).isEqualTo("SKU-2");
         assertThat(state.value(CartGraphStateKeys.WORKFLOW_STATUS, ""))
                 .isEqualTo(CartWorkflowStatus.ADD_SUCCESS.name());
     }
@@ -998,7 +1060,8 @@ class CartManageSubgraphFactoryTest {
                 catalogResolver,
                 pendingRepository,
                 new StubSlotFilling(filledSlots),
-                candidateSelectionLlmService
+                candidateSelectionLlmService,
+                stubCatalogFacade()
         );
         Map<String, Object> initialState = new LinkedHashMap<>(extraState);
         initialState.put(GuideGraphStateKeys.USER_ID, USER_ID);
@@ -1012,6 +1075,29 @@ class CartManageSubgraphFactoryTest {
         return new ProductCandidate(productId, skuId, name, new BigDecimal("9.90"), "brand", "spec", "SPU-" + productId);
     }
 
+    private static AgentSessionState sessionStateWithCandidates(String... productIds) {
+        return new AgentSessionState(
+                "1.0",
+                USER_ID,
+                CONVERSATION_ID,
+                Instant.now(),
+                List.of(),
+                new RecommendationState(
+                        "FUZZY_RECOMMEND",
+                        null,
+                        Map.of(),
+                        Map.of(),
+                        List.of(),
+                        null,
+                        new CandidateSnapshot(List.of(productIds), Instant.now()),
+                        LastRecommendationResult.empty()
+                ),
+                MultimodalState.empty(),
+                com.bytedance.ai.graph.session.CartState.empty(),
+                OrderState.empty()
+        );
+    }
+
     private CartManageSubgraphFactory factoryForSelectionParsing(CandidateSelectionLlmService candidateSelectionLlmService) {
         return new CartManageSubgraphFactory(
                 (userId, conversationId) -> cart(),
@@ -1020,8 +1106,28 @@ class CartManageSubgraphFactoryTest {
                 ProductCatalogResolver.empty(),
                 new StubPendingRepository(),
                 new StubSlotFilling(CartManageSlots.unknown("unused")),
-                candidateSelectionLlmService
+                candidateSelectionLlmService,
+                stubCatalogFacade()
         );
+    }
+
+    private static com.bytedance.ai.graph.catalog.api.CatalogQueryFacade stubCatalogFacade() {
+        return new com.bytedance.ai.graph.catalog.api.CatalogQueryFacade() {
+            @Override
+            public com.bytedance.ai.graph.catalog.api.CatalogSpuView getSpu(Long spuId) {
+                return null;
+            }
+
+            @Override
+            public java.util.Optional<com.bytedance.ai.graph.catalog.api.CatalogSpuView> findSpuByExternalRef(String externalRef) {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public java.util.List<com.bytedance.ai.graph.catalog.api.CatalogSkuView> listSkus(Long spuId) {
+                return java.util.List.of();
+            }
+        };
     }
 
     private static ProductCandidate candidate(

@@ -463,6 +463,9 @@ public class RagConversationService implements com.bytedance.ai.retrieval.spi.Ag
         filters.put("sourceUriPrefix", filter.sourceUriPrefix());
         filters.put("tags", filter.tags());
         filters.put("headingPathContains", filter.headingPathContains());
+        filters.put("externalRefs", filter.externalRefs());
+        filters.put("productIds", filter.productIds());
+        filters.put("catalogSpuIds", filter.catalogSpuIds());
         return filters;
     }
 

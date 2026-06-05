@@ -14,6 +14,7 @@ import com.bytedance.ai.graph.catalog.api.CatalogQueryFacade;
 import com.bytedance.ai.graph.catalog.api.CatalogSpuView;
 import com.bytedance.ai.graph.GuideGraphStateKeys;
 import com.bytedance.ai.graph.cartmanage.subgraph.PendingCartActionRepository;
+import com.bytedance.ai.graph.intent.support.SlotKeys;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -76,6 +77,8 @@ public class OrderManageSubgraphFactory {
                             OrderManageAction.PROVIDE_ADDRESS.name(), "order_resolve_address",
                             OrderManageAction.CONFIRM_ORDER.name(), "order_execute_create",
                             OrderManageAction.CANCEL_ORDER.name(), "order_cancel_order",
+                            OrderManageAction.ORDER_QUERY.name(), "order_final_response",
+                            OrderManageAction.LOGISTICS_QUERY.name(), "order_final_response",
                             OrderManageAction.UNKNOWN.name(), "order_final_response"
                     ));
             subgraph.addConditionalEdges("order_load_cart",
@@ -130,10 +133,16 @@ public class OrderManageSubgraphFactory {
 
     private Map<String, Object> orderResolveAction(OverAllState state) {
         String message = state.value(GuideGraphStateKeys.MESSAGE, "");
+        Map<String, Object> intentSlots = readIntentSlots(state);
         boolean hasPending = state.value(OrderManageStateKeys.PENDING_ORDER_ACTION_ID).isPresent();
         OrderManageStatus status = parseStatus(state.value(OrderManageStateKeys.ORDER_STATUS, ""));
-        OrderManageAction action;
-        if (hasPending && looksLikeCancel(message)) {
+        OrderManageAction action = firstKnownAction(
+                parseAction(actionField(intentSlots, SlotKeys.ACTION_TYPE)),
+                parseAction(state.value(GuideGraphStateKeys.SUB_INTENT).map(Object::toString).orElse(null))
+        );
+        if (action != OrderManageAction.UNKNOWN) {
+            // The one-pass intent router already made the workflow-internal action explicit.
+        } else if (hasPending && looksLikeCancel(message)) {
             action = OrderManageAction.CANCEL_ORDER;
         } else if (hasPending && status == OrderManageStatus.WAITING_ADDRESS && addressResolver.looksLikeAddress(message)) {
             action = OrderManageAction.PROVIDE_ADDRESS;
@@ -227,13 +236,20 @@ public class OrderManageSubgraphFactory {
             return updates;
         }
         AddressSnapshot existing = AddressSnapshot.fromMap(state.value(OrderManageStateKeys.ADDRESS_SNAPSHOT, Map.<String, Object>of()));
-        if (StringUtils.hasText(existing.receiverName())
-                && StringUtils.hasText(existing.phone())
-                && StringUtils.hasText(existing.addressText())) {
+        if (!addressComplete(existing)) {
+            // 图状态不跨 HTTP 轮次保留，确认轮要从 pending 记录里取回上一轮已保存的地址，
+            // 否则会重新解析（可能拿到 null/确认语）并误判地址缺失。
+            existing = pendingRepository.findById(pendingId.get())
+                    .map(record -> AddressSnapshot.fromMap(record.addressSnapshot()))
+                    .filter(this::addressComplete)
+                    .orElse(existing);
+        }
+        if (addressComplete(existing)) {
+            updates.put(OrderManageStateKeys.ADDRESS_SNAPSHOT, existing.toMap());
             updates.put("orderResolveAddressRoute", "ADDRESS_READY");
             return updates;
         }
-        AddressParseResult parsed = addressResolver.parse(state.value(GuideGraphStateKeys.MESSAGE, ""));
+        AddressParseResult parsed = addressResolver.parse(addressInput(state));
         if (!parsed.complete()) {
             pendingRepository.markWaitingAddress(pendingId.get());
             updates.put(OrderManageStateKeys.ORDER_STATUS, OrderManageStatus.WAITING_ADDRESS.name());
@@ -247,6 +263,13 @@ public class OrderManageSubgraphFactory {
         updates.put(OrderManageStateKeys.ADDRESS_SNAPSHOT, address);
         updates.put("orderResolveAddressRoute", "ADDRESS_READY");
         return updates;
+    }
+
+    private boolean addressComplete(AddressSnapshot address) {
+        return address != null
+                && StringUtils.hasText(address.receiverName())
+                && StringUtils.hasText(address.phone())
+                && StringUtils.hasText(address.addressText());
     }
 
     private String routeAfterResolveAddress(OverAllState state) {
@@ -324,11 +347,39 @@ public class OrderManageSubgraphFactory {
         if (state.value(OrderManageStateKeys.NODE_MESSAGE).isPresent()) {
             return Map.of();
         }
+        OrderManageAction action = parseAction(state.value(OrderManageStateKeys.ORDER_ACTION, ""));
+        if (action == OrderManageAction.ORDER_QUERY || action == OrderManageAction.LOGISTICS_QUERY) {
+            return orderQueryResponse(state, action);
+        }
         return Map.of(
                 OrderManageStateKeys.NODE_MESSAGE,
                 "请提供收货人姓名、联系电话和详细收货地址，例如：Zhang，0412345678，UNSW High Street, Kensington NSW 2052。",
                 OrderManageStateKeys.NEED_USER_INPUT,
                 true
+        );
+    }
+
+    private Map<String, Object> orderQueryResponse(OverAllState state, OrderManageAction action) {
+        String userId = requiredString(state, GuideGraphStateKeys.USER_ID);
+        String conversationId = requiredString(state, GuideGraphStateKeys.CONVERSATION_ID);
+        String orderRef = actionField(readIntentSlots(state), SlotKeys.ACTION_ORDER_REF);
+        Optional<MockOrderRecord> order = orderCommandService.findOrder(userId, conversationId, orderRef);
+        if (order.isEmpty()) {
+            return Map.of(
+                    OrderManageStateKeys.ORDER_STATUS, OrderManageStatus.FAILED.name(),
+                    OrderManageStateKeys.NODE_MESSAGE, "没有找到对应订单，请提供订单号或先完成下单。",
+                    OrderManageStateKeys.NEED_USER_INPUT, true
+            );
+        }
+        MockOrderRecord record = order.get();
+        String message = action == OrderManageAction.LOGISTICS_QUERY
+                ? "订单 " + record.orderNo() + " 当前为模拟订单，暂未接入真实物流；订单状态：" + record.status() + "。"
+                : "订单 " + record.orderNo() + " 状态：" + record.status() + "，金额：¥" + record.totalAmount() + "。";
+        return Map.of(
+                OrderManageStateKeys.ORDER_STATUS, record.status(),
+                OrderManageStateKeys.ORDER_NO, record.orderNo(),
+                OrderManageStateKeys.NODE_MESSAGE, message,
+                OrderManageStateKeys.NEED_USER_INPUT, false
         );
     }
 
@@ -389,8 +440,66 @@ public class OrderManageSubgraphFactory {
         return text.contains("取消") || text.contains("先不买") || text.contains("不要了");
     }
 
+    private OrderManageAction firstKnownAction(OrderManageAction... actions) {
+        if (actions == null) {
+            return OrderManageAction.UNKNOWN;
+        }
+        for (OrderManageAction action : actions) {
+            if (action != null && action != OrderManageAction.UNKNOWN) {
+                return action;
+            }
+        }
+        return OrderManageAction.UNKNOWN;
+    }
+
+    private OrderManageAction parseAction(String value) {
+        if (!StringUtils.hasText(value)) {
+            return OrderManageAction.UNKNOWN;
+        }
+        return switch (value.trim().toUpperCase()) {
+            case "CREATE_ORDER", "CHECKOUT_REQUEST", "CHECKOUT", "BUY_NOW" -> OrderManageAction.CHECKOUT_REQUEST;
+            case "FILL_ADDRESS", "PROVIDE_ADDRESS", "ADDRESS" -> OrderManageAction.PROVIDE_ADDRESS;
+            case "CONFIRM_ORDER", "CONFIRM" -> OrderManageAction.CONFIRM_ORDER;
+            case "CANCEL_ORDER", "CANCEL" -> OrderManageAction.CANCEL_ORDER;
+            case "ORDER_QUERY", "QUERY_ORDER" -> OrderManageAction.ORDER_QUERY;
+            case "LOGISTICS_QUERY", "QUERY_LOGISTICS", "TRACK_ORDER" -> OrderManageAction.LOGISTICS_QUERY;
+            default -> OrderManageAction.UNKNOWN;
+        };
+    }
+
     private String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readIntentSlots(OverAllState state) {
+        return state.value(GuideGraphStateKeys.INTENT_SLOTS)
+                .filter(value -> value instanceof Map)
+                .map(value -> (Map<String, Object>) value)
+                .orElse(Map.of());
+    }
+
+    private String actionField(Map<String, Object> intentSlots, String key) {
+        Object action = intentSlots.get(SlotKeys.ACTION);
+        if (!(action instanceof Map<?, ?> actionMap)) {
+            return null;
+        }
+        Object value = actionMap.get(key);
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim();
+        return text.isBlank() ? null : text;
+    }
+
+    private String addressInput(OverAllState state) {
+        Map<String, Object> slots = readIntentSlots(state);
+        String addressRef = actionField(slots, SlotKeys.ACTION_ADDRESS_REF);
+        if (StringUtils.hasText(addressRef)) {
+            String source = actionField(slots, SlotKeys.ACTION_SOURCE);
+            return StringUtils.hasText(source) ? source + " " + addressRef : addressRef;
+        }
+        return state.value(GuideGraphStateKeys.MESSAGE, "");
     }
 
     private String validateStock(CartView cart) {
