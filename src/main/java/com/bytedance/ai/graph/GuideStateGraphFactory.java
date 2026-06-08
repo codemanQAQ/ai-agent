@@ -946,6 +946,12 @@ public class GuideStateGraphFactory {
         if (productRecommendationEnabled()) {
             List<ProductRecallCandidate> recalledCandidates;
             ProductCandidatePostProcessResult postProcessResult;
+            // 本轮是否在引用上一轮某序号商品（"第N款评价怎么样/详情/价格"）——若是，则把候选锁定到那一款，
+            // 而不是按品类重新推荐一遍。声明在此，后处理后用于过滤 + 保留原快照（支持继续问"第N款"）。
+            com.bytedance.ai.graph.session.CandidateSnapshotItem referencedItem =
+                    (subScene == ProductRecommendSubScene.SCENE_BUNDLE_RECOMMEND
+                            || subScene == ProductRecommendSubScene.PRODUCT_COMPARE) ? null
+                            : referencedSnapshotItem(state, sessionState);
             if (subScene == ProductRecommendSubScene.SCENE_BUNDLE_RECOMMEND) {
                 SceneBundlePlan bundlePlan = sceneBundlePlanner.plan(queryContext, bundleRolesFromState(state));
                 List<Map<String, Object>> roleResults = new ArrayList<>();
@@ -985,8 +991,22 @@ public class GuideStateGraphFactory {
                         recallPlan.outputLimit()
                 );
             }
-            List<ProductCard> productCards = productCardMapper.toCards(postProcessResult.candidates());
-            CandidateSnapshot candidateSnapshot = postProcessResult.candidateSnapshot();
+            // 锁定到被引用的那一款：从同品类召回结果里按 productId 筛出它，避免把其它商品又推一遍。
+            // 万一这一轮没召回到它（极少），用上一轮快照项兜底建一张卡，至少聚焦正确的商品。
+            List<ProductRecallCandidate> finalCandidates = postProcessResult.candidates();
+            if (referencedItem != null) {
+                List<ProductRecallCandidate> scoped = finalCandidates.stream()
+                        .filter(candidate -> matchesSnapshotItem(candidate, referencedItem))
+                        .toList();
+                finalCandidates = scoped.isEmpty()
+                        ? List.of(candidateFromSnapshotItem(referencedItem))
+                        : scoped;
+            }
+            List<ProductCard> productCards = productCardMapper.toCards(finalCandidates);
+            // 引用既有商品的询问轮：保留上一轮的候选快照，确保后续还能继续按"第N款"指代。
+            CandidateSnapshot candidateSnapshot = referencedItem != null
+                    ? sessionState.recommendationState().candidateSnapshot()
+                    : postProcessResult.candidateSnapshot();
 
             workflowResult.put("products", productCards.stream().map(this::productCardMap).toList());
             if (subScene == ProductRecommendSubScene.PRODUCT_COMPARE) {
@@ -1252,6 +1272,104 @@ public class GuideStateGraphFactory {
         return Map.copyOf(map);
     }
 
+    /**
+     * 本轮是否在用序号/指代引用上一轮推荐里的某个商品（如"第1款评价怎么样"、"第二个详情"）。
+     * 已经是指名/对比（已有 productRefs）的不处理；解析到序号且上一轮快照里有该项时返回该项，否则 null。
+     */
+    private com.bytedance.ai.graph.session.CandidateSnapshotItem referencedSnapshotItem(
+            OverAllState state, AgentSessionState sessionState) {
+        if (sessionState == null || sessionState.recommendationState() == null) {
+            return null;
+        }
+        CandidateSnapshot snapshot = sessionState.recommendationState().candidateSnapshot();
+        if (snapshot == null || snapshot.items() == null || snapshot.items().isEmpty()) {
+            return null;
+        }
+        // 以本轮消息里的序号为准（LLM 有时会把"第一款"误塞进 productRefs，故不依赖它），
+        // 从上一轮真实推荐快照里取对应项。
+        String message = state.value(GuideGraphStateKeys.MESSAGE, "");
+        int index = parseOrdinalReference(message, snapshot.items().size());
+        if (index < 1 || index > snapshot.items().size()) {
+            return null;
+        }
+        return snapshot.items().get(index - 1);
+    }
+
+    /** 解析"第N款/第N个/第N种/第N件/第N位"里的序号（支持阿拉伯数字与一~十）；无则返回 -1。 */
+    private int parseOrdinalReference(String message, int max) {
+        if (message == null || message.isBlank()) {
+            return -1;
+        }
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("第\\s*([0-9]+|[一二三四五六七八九十])\\s*(款|个|种|件|位|项)?").matcher(message);
+        if (!matcher.find()) {
+            return -1;
+        }
+        return chineseOrArabicToInt(matcher.group(1));
+    }
+
+    private int chineseOrArabicToInt(String token) {
+        if (token == null || token.isBlank()) {
+            return -1;
+        }
+        String t = token.trim();
+        try {
+            return Integer.parseInt(t);
+        } catch (NumberFormatException ignored) {
+            return switch (t) {
+                case "一" -> 1;
+                case "二" -> 2;
+                case "三" -> 3;
+                case "四" -> 4;
+                case "五" -> 5;
+                case "六" -> 6;
+                case "七" -> 7;
+                case "八" -> 8;
+                case "九" -> 9;
+                case "十" -> 10;
+                default -> -1;
+            };
+        }
+    }
+
+    /** 候选是否就是快照里被引用的那一项（按 productId / externalRef 比对）。 */
+    private boolean matchesSnapshotItem(ProductRecallCandidate candidate,
+                                        com.bytedance.ai.graph.session.CandidateSnapshotItem item) {
+        if (candidate == null || item == null) {
+            return false;
+        }
+        return equalsNonBlank(candidate.productId(), item.productId())
+                || equalsNonBlank(candidate.externalRef(), item.externalRef())
+                || equalsNonBlank(candidate.productId(), item.externalRef())
+                || equalsNonBlank(candidate.externalRef(), item.productId());
+    }
+
+    private boolean equalsNonBlank(String a, String b) {
+        return a != null && !a.isBlank() && a.equals(b);
+    }
+
+    /** 兜底：当本轮没召回到被引用商品时，用上一轮快照项建一张最小候选（至少聚焦正确商品的标题）。 */
+    private ProductRecallCandidate candidateFromSnapshotItem(
+            com.bytedance.ai.graph.session.CandidateSnapshotItem item) {
+        return new ProductRecallCandidate(
+                item.productId(),
+                null,
+                item.skuId(),
+                item.externalRef(),
+                item.title(),
+                null,
+                List.of(),
+                null,
+                null,
+                item.imageUrl(),
+                com.bytedance.ai.graph.productrecommend.ProductRecallSource.HISTORY_SNAPSHOT,
+                1.0d,
+                1.0d,
+                Map.of(),
+                List.of()
+        );
+    }
+
     private Map<String, Object> comparisonMap(List<ProductCard> productCards, UnifiedQueryContext queryContext) {
         Map<String, Object> map = new LinkedHashMap<>();
         List<Map<String, Object>> items = productCards.stream()
@@ -1504,6 +1622,8 @@ public class GuideStateGraphFactory {
 
     private GuideNodeExecutionResult buildAnswerContext(OverAllState state) {
         Map<String, Object> answerContext = new LinkedHashMap<>();
+        // 用户原话：让答案生成按本轮真实问题（推荐/对比/评价/价格/详情…）作答，而非千篇一律"为您推荐"。
+        answerContext.put("userQuery", state.value(GuideGraphStateKeys.MESSAGE, ""));
         answerContext.put("intent", GuideGraphStateValues.intent(state, GuideGraphStateKeys.INTENT)
                 .orElse(GuideGraphIntent.CLARIFY).name());
         String targetWorkflow = state.value(GuideGraphStateKeys.TARGET_WORKFLOW, GuideGraphNodeNames.CLARIFY_WORKFLOW);

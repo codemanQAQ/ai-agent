@@ -138,7 +138,17 @@ public final class AgentSessionStateMerger {
             return Map.copyOf(merged);
         }
         for (Map.Entry<String, Object> entry : patch.entrySet()) {
-            if (hasValue(entry.getValue())) {
+            if (!hasValue(entry.getValue())) {
+                continue;
+            }
+            Object baseValue = merged.get(entry.getKey());
+            // 列表值做并集去重（如负向 brands：不要oppo + 不要vivo → [oppo, vivo]；正向多值属性同理），
+            // 标量值取最新。否则后一轮只给单个值会覆盖掉前几轮累积的约束。
+            if (baseValue instanceof List<?> baseList && entry.getValue() instanceof List<?> patchList) {
+                java.util.LinkedHashSet<Object> union = new java.util.LinkedHashSet<>(baseList);
+                union.addAll(patchList);
+                merged.put(entry.getKey(), new java.util.ArrayList<>(union));
+            } else {
                 merged.put(entry.getKey(), entry.getValue());
             }
         }

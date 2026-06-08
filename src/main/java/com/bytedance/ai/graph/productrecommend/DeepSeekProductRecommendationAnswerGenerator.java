@@ -75,6 +75,7 @@ public class DeepSeekProductRecommendationAnswerGenerator implements ProductReco
 
     private String prompt(Map<String, Object> answerContext, String fallbackAnswer) {
         Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("userQuery", answerContext.get("userQuery"));
         payload.put("intent", answerContext.get("intent"));
         payload.put("targetWorkflow", answerContext.get("targetWorkflow"));
         payload.put("products", firstItems(answerContext.get("products"), MAX_PRODUCTS));
@@ -87,14 +88,21 @@ public class DeepSeekProductRecommendationAnswerGenerator implements ProductReco
         payload.put("fallbackAnswer", fallbackAnswer);
 
         return """
-                你是电商导购助手。请基于下面 JSON 中的最终召回商品、排序、证据和用户约束，生成给用户看的中文回复。
+                你是电商导购助手。请**先理解 userQuery（用户这轮真正在问什么）**，再基于 JSON 里的商品、
+                排序、证据和约束，用中文自然地回答这个问题。回复的开头和内容要贴合问题语义，不要套用固定模板。
 
-                要求：
+                按 userQuery 的语义作答（不要无脑“为您推荐”）：
+                - 问某一款的评价/口碑/好不好 → 就讲这款的评价与适用人群（无评价数据时，基于功效/卖点客观说明，并说明暂无用户评价）。
+                - 问价格/规格/库存/参数 → 直接回答对应信息。
+                - 问“哪个好/对比/区别” → 点明候选之间的差异与如何取舍。
+                - 让推荐/帮挑 → 才解释为什么推荐前 1-3 个商品。
+                - 只有一个商品时，就只聊这一个，不要再罗列其它商品。
+
+                通用要求：
                 1. 不要编造 JSON 中没有的商品、价格、库存、功效或评价。
-                2. 优先解释为什么推荐前 1-3 个商品；如果有对比或场景组合，也要点明差异或组合角色。
-                3. 回复要自然、简洁，可直接展示给用户。
-                4. 不输出 JSON，不输出内部字段名，不提“召回”“RAG”“模型”。
-                5. 如果证据不足，只基于商品标题、品牌、价格、库存和推荐理由保守表达。
+                2. 回复自然、简洁，可直接展示给用户；开场白随问题而变，不要每次都以“根据您的需求，为您推荐”开头。
+                3. 不输出 JSON，不输出内部字段名，不提“召回”“RAG”“模型”。
+                4. 证据不足时，只基于商品标题、品牌、价格、库存和推荐理由保守表达。
 
                 输入 JSON：
                 %s
