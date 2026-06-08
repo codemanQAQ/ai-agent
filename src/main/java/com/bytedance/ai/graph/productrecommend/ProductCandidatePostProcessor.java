@@ -58,9 +58,10 @@ public class ProductCandidatePostProcessor {
         Map<String, Object> positiveConstraints = queryContext == null ? Map.of() : queryContext.positiveConstraints();
         Map<String, Object> negativeConstraints = queryContext == null ? Map.of() : queryContext.negativeConstraints();
         List<ProductRecallCandidate> fused = fusionService.fuse(recalledCandidates);
+        // 强约束（类目/价格/库存）始终强制；软偏好（品牌/属性等）仅在计划要求时强制。
         ProductCandidateFilterResult positiveFiltered = recallPlan != null && recallPlan.enforcePositiveConstraints()
                 ? positiveConstraintFilter.filter(fused, positiveConstraints)
-                : new ProductCandidateFilterResult(fused, List.of());
+                : positiveConstraintFilter.filterHard(fused, positiveConstraints);
         ProductCandidateFilterResult negativeFiltered = negativeConstraintFilter.filter(positiveFiltered.candidates(), negativeConstraints);
         List<ProductRecallCandidate> boosted = boostMultiTurnSnapshotCandidates(negativeFiltered.candidates(), queryContext, recallPlan);
         List<ProductRecallCandidate> ranked = ranker.rank(boosted, positiveConstraints, negativeConstraints);

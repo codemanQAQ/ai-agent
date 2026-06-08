@@ -658,7 +658,8 @@ public class GuideStateGraphFactory {
         if (decision == null) {
             return "DEFAULT";
         }
-        if ("deterministic order_manage pre-router".equals(decision.reason())) {
+        if ("deterministic order_manage pre-router".equals(decision.reason())
+                || "deterministic cart_manage pre-router".equals(decision.reason())) {
             return "RULE";
         }
         if ("intent router service unavailable".equals(decision.reason())) {
@@ -668,6 +669,10 @@ public class GuideStateGraphFactory {
     }
 
     private MainIntentDecision routeWithIntentService(OverAllState state) {
+        MainIntentDecision cartSelectionDecision = deterministicCartSelectionRoute(state);
+        if (cartSelectionDecision != null) {
+            return cartSelectionDecision;
+        }
         MainIntentDecision deterministicOrderDecision = deterministicOrderRoute(state);
         if (deterministicOrderDecision != null) {
             return deterministicOrderDecision;
@@ -689,6 +694,40 @@ public class GuideStateGraphFactory {
                 ? "[本轮用户上传了一张商品图片。若用户想找同款/相似/这个商品，应判定为 PHOTO_SEARCH 拍照找货意图。]\n" + userMessage
                 : userMessage;
         return mainIntentRouterService.route(routerMessage, conversationMemory(state));
+    }
+
+    /**
+     * 购物车待选的确定性预路由：上一轮加购命中多个候选、等待用户选序号时，本轮的"1"/"选第2个"等
+     * 后续选择必须路由回购物车子图（由其内部消费待办动作完成加购），否则会被意图 LLM 误判为 OTHER
+     * 走澄清，选择被丢弃。
+     */
+    private MainIntentDecision deterministicCartSelectionRoute(OverAllState state) {
+        if (cartManageSubgraphFactory == null) {
+            return null;
+        }
+        String message = requiredString(state, GuideGraphStateKeys.MESSAGE);
+        String userId = requiredString(state, GuideGraphStateKeys.USER_ID);
+        String conversationId = requiredString(state, GuideGraphStateKeys.CONVERSATION_ID);
+        if (!cartManageSubgraphFactory.isPendingSelectionFollowUp(userId, conversationId, message)) {
+            return null;
+        }
+        log.atInfo()
+                .addKeyValue("routeSource", "RULE")
+                .addKeyValue("selectedWorkflow", GuideGraphNodeNames.CART_MANAGE_WORKFLOW)
+                .addKeyValue("messagePreview", message.length() > 40 ? message.substring(0, 40) : message)
+                .log("main deterministic pre-router selected cart_manage_workflow (pending selection follow-up)");
+        return new MainIntentDecision(
+                MainIntent.ADD_TO_CART,
+                1.0d,
+                false,
+                true,
+                GuideGraphNodeNames.CART_MANAGE_WORKFLOW,
+                MainIntent.ADD_TO_CART.name(),
+                "deterministic cart_manage pre-router",
+                null,
+                Map.of(),
+                List.of()
+        );
     }
 
     private MainIntentDecision deterministicOrderRoute(OverAllState state) {
@@ -1906,13 +1945,29 @@ public class GuideStateGraphFactory {
         ProductCandidate candidate = result.productCandidates().isEmpty()
                 ? null
                 : result.productCandidates().getFirst();
-        String productName = candidate == null || candidate.productName() == null
-                ? "该商品"
-                : candidate.productName();
+        // 直接加购成功时 productCandidates 常为空（仅在需用户选择时填充），回退到已解析的槽位商品名，
+        // 避免回复显示成"该商品"。
+        String slotName = result.slots() == null ? null : result.slots().productName();
+        String productName = firstNonBlankText(
+                candidate == null ? null : candidate.productName(),
+                slotName,
+                "该商品"
+        );
         int quantity = result.slots() == null || result.slots().quantity() == null
                 ? 1
                 : Math.max(result.slots().quantity(), 1);
         return "已将「" + productName + "」加入购物车，数量 " + quantity + "。";
+    }
+
+    private String firstNonBlankText(String... values) {
+        if (values != null) {
+            for (String value : values) {
+                if (value != null && !value.isBlank()) {
+                    return value;
+                }
+            }
+        }
+        return null;
     }
 
     private String clarifyFallback(String clarifyReason) {

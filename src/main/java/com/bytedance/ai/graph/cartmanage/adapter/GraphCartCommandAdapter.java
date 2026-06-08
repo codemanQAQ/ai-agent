@@ -47,18 +47,10 @@ public class GraphCartCommandAdapter implements CartCommandService {
                     "productId must be a numeric id: " + productId);
         }
         try {
-            if (expectedUnitPrice != null) {
-                log.atInfo()
-                        .addKeyValue("event.name", "cart_manage.add_item.ignored_candidate_price")
-                        .addKeyValue("cart.user_id", userId)
-                        .addKeyValue("cart.product_id", productId)
-                        .addKeyValue("cart.sku_id", skuId)
-                        .addKeyValue("cart.expected_price", expectedUnitPrice)
-                        .addKeyValue("cart.price_source", "CANDIDATE_CACHE")
-                        .log("Ignoring candidate cached price for cart mutation; cart aggregate uses current catalog price");
-            }
+            // 透传所选 skuId：购物车按该 SKU 的当前目录价与规格落地（价格不取缓存，仍由聚合按目录解析），
+            // expectedUnitPrice 不进价格校验以免与 SPU 基准价比对误拒。
             CartView updated = cartCommandFacade.addItem(
-                    userId, conversationId, spuId, null, quantity, null);
+                    userId, conversationId, spuId, null, skuId, quantity, null);
             return CartMutationResult.ok(updated);
         } catch (RuntimeException exception) {
             log.atWarn()

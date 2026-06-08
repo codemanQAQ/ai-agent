@@ -290,8 +290,15 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("a", encoding="utf-8", newline="\n") as output_file:
         embedded = 0
+        skipped = 0
         for batch in batched(pending, args.batch_size):
-            input_items = [build_input_item(chunk, dataset_root) for chunk in batch]
+            try:
+                input_items = [build_input_item(chunk, dataset_root) for chunk in batch]
+            except FileNotFoundError as exc:
+                # 新增商品可能只有 JSON、没有图片文件，跳过其图片 chunk（文本 chunk 不受影响）。
+                skipped += len(batch)
+                print(f"skip (missing image): {exc}")
+                continue
             embeddings = embed_with_retries(
                 args.api_url,
                 api_key,
@@ -306,7 +313,9 @@ def main() -> None:
                 output_file.write("\n")
             output_file.flush()
             embedded += len(batch)
-            print(f"embedded {embedded}/{len(pending)}")
+            if embedded % 100 == 0:
+                print(f"embedded {embedded}/{len(pending)} (skipped {skipped})")
+        print(f"DONE embedded={embedded} skipped={skipped} pending={len(pending)}")
 
 
 if __name__ == "__main__":

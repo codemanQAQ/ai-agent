@@ -35,11 +35,54 @@ public class PositiveConstraintFilter {
         return new ProductCandidateFilterResult(kept, exclusions);
     }
 
+    /**
+     * 仅强制"强约束"（类目/价格/库存）。这类约束无论召回场景如何都应满足——例如用户明确说
+     * "3000以内的手机"，即便意图被判为宽召回(FUZZY)，也不该把配件/其它类目商品作为兜底返回。
+     * 软偏好（品牌/属性/规格/商品范围）仍由 {@link #filter} 在需要时强制。
+     */
+    public ProductCandidateFilterResult filterHard(
+            List<ProductRecallCandidate> candidates,
+            Map<String, Object> positiveConstraints
+    ) {
+        if (candidates == null || candidates.isEmpty()) {
+            return new ProductCandidateFilterResult(List.of(), List.of());
+        }
+        if (positiveConstraints == null || positiveConstraints.isEmpty()) {
+            return new ProductCandidateFilterResult(candidates, List.of());
+        }
+        List<ProductRecallCandidate> kept = new ArrayList<>();
+        List<ProductCandidateExclusion> exclusions = new ArrayList<>();
+        for (ProductRecallCandidate candidate : candidates) {
+            String reason = hardMismatchReason(candidate, positiveConstraints);
+            if (StringUtils.hasText(reason)) {
+                exclusions.add(ProductCandidateExclusion.of(candidate, reason));
+            } else {
+                kept.add(candidate);
+            }
+        }
+        return new ProductCandidateFilterResult(kept, exclusions);
+    }
+
+    private String hardMismatchReason(ProductRecallCandidate candidate, Map<String, Object> constraints) {
+        if (!matchesCategory(candidate, firstPresent(constraints, "category", "categoryPath", "类目"))) {
+            return "不满足类目条件";
+        }
+        if (!matchesPrice(candidate, constraints)) {
+            return "不满足价格条件";
+        }
+        if (!matchesStock(candidate, constraints)) {
+            return "不满足库存条件";
+        }
+        return null;
+    }
+
     private String mismatchReason(ProductRecallCandidate candidate, Map<String, Object> constraints) {
         if (!matchesAny(candidate.productId(), values(constraints, "productIds", "productId"))) {
             return "不满足商品范围条件";
         }
-        if (!matchesAny(candidate.externalRef(), values(constraints, "externalRefs", "externalRef", "productRefs"))) {
+        // 注意：productRefs 是意图抽取的自然语言商品名（如"珀莱雅精华液"），用于召回提示，
+        // 不是 externalRef/ID 白名单；放进这里会把召回到的候选按 ID 精确比对而全部误删。
+        if (!matchesAny(candidate.externalRef(), values(constraints, "externalRefs", "externalRef"))) {
             return "不满足商品范围条件";
         }
         // 品牌/子品牌（如"特仑苏"）常出现在标题而非 brand 字段（brand="蒙牛"），
@@ -47,8 +90,7 @@ public class PositiveConstraintFilter {
         if (!matchesTextAny(firstPresent(constraints, "brand", "品牌"), candidate.brand(), candidate.title())) {
             return "不满足品牌条件";
         }
-        if (!matchesTextAny(firstPresent(constraints, "category", "categoryPath", "类目"),
-                String.join("/", candidate.categoryPath()), candidate.title())) {
+        if (!matchesCategory(candidate, firstPresent(constraints, "category", "categoryPath", "类目"))) {
             return "不满足类目条件";
         }
         if (!matchesPrice(candidate, constraints)) {
@@ -79,6 +121,34 @@ public class PositiveConstraintFilter {
         }
         for (String actual : actuals) {
             if (containsIgnoreCase(actual, expectedText)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 类目只按结构化类目路径判定，不看标题：
+     *   - 直接包含即命中（"手机" ⊂ "数码电子/智能手机"）；
+     *   - 否则按 token 重叠兼容同义类目（"蓝牙耳机" ∩ "真无线耳机" = {耳机}）；
+     *   - 类目路径缺失时才退回标题包含兜底。
+     * 这样能挡住标题里恰好提到品类词、实则属于其它类目的商品（如"车载手机支架"不属于"手机"）。
+     */
+    private boolean matchesCategory(ProductRecallCandidate candidate, Object expected) {
+        String expectedText = text(expected);
+        if (!StringUtils.hasText(expectedText)) {
+            return true;
+        }
+        String path = String.join("/", candidate.categoryPath());
+        if (!StringUtils.hasText(path)) {
+            return containsIgnoreCase(candidate.title(), expectedText);
+        }
+        if (containsIgnoreCase(path, expectedText)) {
+            return true;
+        }
+        java.util.Set<String> have = ProductRecallTextTokenizer.tokens(path);
+        for (String term : ProductRecallTextTokenizer.tokens(expectedText)) {
+            if (term.length() >= 2 && have.contains(term)) {
                 return true;
             }
         }

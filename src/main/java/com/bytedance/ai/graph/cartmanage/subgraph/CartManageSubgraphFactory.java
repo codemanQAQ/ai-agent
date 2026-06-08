@@ -261,6 +261,20 @@ public class CartManageSubgraphFactory {
             "^\\s*(?:我)?\\s*(?:选|选择|要|想要|就)?\\s*(?:第)?\\s*([1-5一二三四五])\\s*(?:个|款|号)?\\s*(?:吧)?\\s*$"
     );
 
+    /**
+     * 本会话是否存在"等待用户从候选中选择"的待办购物车动作，且本轮消息像是一次选择（序号/"选第N个"/
+     * 属性指代）。供主路由做确定性预路由：命中时把"1"这类后续选择路由回购物车子图，而不是被意图 LLM
+     * 误判成 OTHER 走澄清，导致选择丢失。
+     */
+    public boolean isPendingSelectionFollowUp(String userId, String conversationId, String message) {
+        if (pendingCartActionRepository == null || message == null || message.isBlank()) {
+            return false;
+        }
+        return pendingCartActionRepository.findActiveByUserIdAndConversationId(userId, conversationId)
+                .map(record -> looksLikeCandidateSelection(message, record.candidates()))
+                .orElse(false);
+    }
+
     private boolean looksLikeCandidateSelection(String message) {
         return looksLikeCandidateSelection(message, List.of());
     }
@@ -354,6 +368,8 @@ public class CartManageSubgraphFactory {
         String snapshotSkuId = snapshotItem == null ? null : snapshotItem.skuId();
         String productName = firstNonBlank(
                 asString(intentSlots.get(SlotKeys.PRODUCT_NAME)),
+                // 按序号("第一个")从快照命中时，回填快照里的商品标题，避免回复显示成"该商品"。
+                snapshotItem == null ? null : snapshotItem.title(),
                 snapshotProductId == null ? actionTargetRef : null,
                 filledSlots.productName()
         );

@@ -15,8 +15,10 @@ import com.bytedance.ai.graph.cart.workflow.CartGuard;
 import com.bytedance.ai.graph.cart.workflow.CartStateMachineFactory;
 import com.bytedance.ai.graph.cart.workflow.CartTransitionAuditService;
 import com.bytedance.ai.graph.cart.workflow.CartWorkflowException;
+import com.bytedance.ai.graph.catalog.api.CatalogSkuView;
 import com.bytedance.ai.graph.catalog.api.CatalogSpuView;
 import java.math.BigDecimal;
+import java.util.stream.Collectors;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -66,6 +68,7 @@ public class ShoppingCartService implements CartCommandFacade, CartQueryFacade {
             String conversationId,
             Long spuId,
             String externalRef,
+            String skuCode,
             Integer quantity,
             BigDecimal expectedUnitPrice
     ) {
@@ -84,20 +87,46 @@ public class ShoppingCartService implements CartCommandFacade, CartQueryFacade {
                 Map.of()
         );
         CatalogSpuView spu = transition(cart, CartEvent.CONFIRM_ADD, command);
+        // 多 SKU 商品按用户所选变体落地：用该 SKU 的当前目录价做单价、标题带上规格，
+        // 避免恒按 SPU 基准价(priceMin)入车而与所选变体不符。
+        CatalogSkuView sku = resolveSku(spu, skuCode);
+        BigDecimal unitPrice = sku != null && sku.price() != null ? sku.price() : displayPrice(spu);
+        Integer stock = sku != null && sku.stock() != null ? sku.stock() : spu.stock();
         int effectiveQuantity = effectiveQuantity(quantity);
         itemRepository.upsertActive(
                 cart.id(),
                 spu.id(),
                 spu.externalRef(),
-                spu.title(),
+                titleWithSpec(spu.title(), sku),
                 spu.brand(),
                 firstImage(spu),
                 effectiveQuantity,
-                displayPrice(spu),
-                spu.stock()
+                unitPrice,
+                stock
         );
         recomputeTotals(cart.id());
         return toView(refresh(cart.id()));
+    }
+
+    private CatalogSkuView resolveSku(CatalogSpuView spu, String skuCode) {
+        if (spu == null || spu.skus() == null || !StringUtils.hasText(skuCode)) {
+            return null;
+        }
+        return spu.skus().stream()
+                .filter(s -> skuCode.equals(s.skuCode()) || skuCode.equals(String.valueOf(s.id())))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String titleWithSpec(String title, CatalogSkuView sku) {
+        if (sku == null || sku.specJson() == null || sku.specJson().isEmpty()) {
+            return title;
+        }
+        String spec = sku.specJson().entrySet().stream()
+                .filter(e -> e.getKey() != null && e.getValue() != null)
+                .map(e -> e.getKey() + "=" + e.getValue())
+                .collect(Collectors.joining(", "));
+        return StringUtils.hasText(spec) ? title + "（" + spec + "）" : title;
     }
 
     @Override

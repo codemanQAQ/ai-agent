@@ -19,13 +19,16 @@ class GraphCartCommandAdapterTest {
 
         adapter.addItem("user-1", "conversation-1", "101", "4", 2, new BigDecimal("199.00"));
 
+        // 缓存价仍不进价格校验（避免与 SPU 基准价误比对），但所选 skuId 必须透传给聚合，用于按 SKU 定价。
         assertThat(commandFacade.expectedUnitPrice).isNull();
         assertThat(commandFacade.spuId).isEqualTo(101L);
+        assertThat(commandFacade.skuCode).isEqualTo("4");
         assertThat(commandFacade.quantity).isEqualTo(2);
     }
 
     private static final class StubCartCommandFacade implements CartCommandFacade {
         Long spuId;
+        String skuCode;
         Integer quantity;
         BigDecimal expectedUnitPrice;
 
@@ -36,8 +39,9 @@ class GraphCartCommandAdapterTest {
 
         @Override
         public CartView addItem(String userId, String conversationId, Long spuId, String externalRef,
-                                Integer quantity, BigDecimal expectedUnitPrice) {
+                                String skuCode, Integer quantity, BigDecimal expectedUnitPrice) {
             this.spuId = spuId;
+            this.skuCode = skuCode;
             this.quantity = quantity;
             this.expectedUnitPrice = expectedUnitPrice;
             return null;

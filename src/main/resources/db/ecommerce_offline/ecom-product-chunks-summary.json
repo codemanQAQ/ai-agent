@@ -1,21 +1,21 @@
 {
-  "chunk_count": 1392,
-  "embedding_required_count": 1292,
-  "text_embedding_count": 1192,
-  "image_embedding_count": 100,
+  "chunk_count": 3342,
+  "embedding_required_count": 3092,
+  "text_embedding_count": 2842,
+  "image_embedding_count": 250,
   "by_chunk_type": {
-    "image_embedding": 100,
-    "marketing_description": 100,
-    "official_faq": 439,
-    "product_parent": 100,
-    "product_profile": 100,
-    "review_summary": 100,
-    "user_review": 453
+    "image_embedding": 250,
+    "marketing_description": 250,
+    "official_faq": 889,
+    "product_parent": 250,
+    "product_profile": 250,
+    "review_summary": 250,
+    "user_review": 1203
   },
   "by_embedding_modality": {
-    "image": 100,
-    "text": 1192
+    "image": 250,
+    "text": 2842
   },
-  "dataset_root": "C:\\development\\ecommerce_agent_dataset",
-  "output": "C:\\development\\ai-agent\\src\\main\\resources\\db\\ecommerce_offline\\ecom-product-chunks.jsonl"
+  "dataset_root": "/work1/mengqingbo/personal/ecommerce_agent_dataset",
+  "output": "/work1/mengqingbo/personal/ai-agent/src/main/resources/db/ecommerce_offline/ecom-product-chunks.jsonl"
 }
