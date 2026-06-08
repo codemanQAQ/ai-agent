@@ -275,6 +275,36 @@ public class CartManageSubgraphFactory {
                 .orElse(false);
     }
 
+    /** 文本是否在指代"购物车里/刚才那件"已有商品（而非一个具体可搜的商品名）。 */
+    private boolean isExistingItemReference(String text) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        for (String token : new String[]{
+                "之前", "刚才", "刚刚", "刚加", "刚买", "那个", "这个", "那款", "这款",
+                "那件", "这件", "购物车", "同样", "一样", "上面", "前面", "同款"}) {
+            if (text.contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 是否"再/又/多买…"这类对上一件商品的追加购买表达。 */
+    private boolean isAddMorePhrase(String message) {
+        if (!StringUtils.hasText(message)) {
+            return false;
+        }
+        for (String token : new String[]{
+                "再买", "再来", "再加", "再要", "再拿", "再下", "多买", "多来", "多加",
+                "追加", "又买", "又来", "又加", "加购两", "加购一"}) {
+            if (message.contains(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean looksLikeCandidateSelection(String message) {
         return looksLikeCandidateSelection(message, List.of());
     }
@@ -399,6 +429,33 @@ public class CartManageSubgraphFactory {
 
         if (quantity == null || quantity < 1) {
             quantity = 1;
+        }
+
+        // "再买两台 / 再来一个 / 那个再要俩"等：对购物车中已有商品的增量指代。没有解析到具体商品
+        // （无 productId、无快照命中），但引用明显指向已有项时，落到购物车里的现有商品并转为
+        // "当前数量 + 增量"的数量更新——否则会把"之前加入购物车的那个"这类短语当商品名去搜而召回失败。
+        if (action == CartAction.ADD
+                && !StringUtils.hasText(productId)
+                && snapshotItem == null
+                && (Boolean.TRUE.equals(contextualReference)
+                        || isExistingItemReference(productName)
+                        || isExistingItemReference(actionTargetRef)
+                        || isAddMorePhrase(userMessage))) {
+            CartView currentCart = cartQueryService.getUserCart(userId, conversationId);
+            List<CartItemView> cartItems = currentCart == null ? List.of() : currentCart.items();
+            if (cartItems != null && !cartItems.isEmpty()) {
+                CartItemView target = cartItems.get(cartItems.size() - 1); // 最近加入的一项
+                int delta = quantity;
+                action = CartAction.UPDATE_QUANTITY;
+                itemIndex = cartItems.size();                              // 1-based 末项
+                quantity = (target.quantity() == null ? 0 : target.quantity()) + delta;
+                productName = target.title();
+                productId = null;
+                skuId = null;
+                updates.put(CartGraphStateKeys.CART_ACTION, action.name());
+                log.info("Cart contextual add-more resolved to existing item: index={}, newQty={}, title={}",
+                        itemIndex, quantity, productName);
+            }
         }
 
         updates.put(CartGraphStateKeys.PRODUCT_NAME, productName);

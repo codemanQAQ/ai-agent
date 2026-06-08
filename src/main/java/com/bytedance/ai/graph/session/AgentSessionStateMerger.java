@@ -53,16 +53,34 @@ public final class AgentSessionStateMerger {
         RecommendationState source = base == null ? RecommendationState.empty() : base;
         Map<String, Object> positivePatch = typedMap(intentSlots == null ? null : intentSlots.get("positiveConstraints"));
         Map<String, Object> negativePatch = typedMap(intentSlots == null ? null : intentSlots.get("negativeConstraints"));
-        // 只有「多轮细化」才在历史累积上叠加；其它意图（换品类/换场景/对比/拍照等）视为新请求，
-        // 以当轮约束为准、重置累积，避免上一轮的 audience/attributes/brand/price 等残留污染本轮。
-        boolean refine = "MULTI_TURN_REFINE".equalsIgnoreCase(activeIntent);
-        Map<String, Object> accumulatedConstraints = refine
+
+        // 非推荐类意图（购物车/下单/闲聊/澄清等）不触碰推荐上下文：原样保留上一轮的品类与累积约束，
+        // 避免一次加购或闲聊把"正在聊的品类"抹掉，导致之后的纯属性追问无类目可继承。
+        if (!isRecommendationIntent(activeIntent)) {
+            return new RecommendationState(
+                    source.activeIntent(),
+                    source.scenario(),
+                    source.accumulatedConstraints(),
+                    source.negativeConstraints(),
+                    source.missingSlots(),
+                    nonBlankString(clarifyQuestion, null),
+                    source.candidateSnapshot(),
+                    source.lastRecommendationResult()
+            );
+        }
+
+        // 推荐类意图：是否点名了新品类？点名新品类→视为新请求、重置累积；未点名（纯价格/属性/肤质/
+        // 人群/场景/偏好等）→视为对最近一次推荐的细化，累积叠加并继承上一轮品类。这不依赖意图标签
+        // 恰好为 MULTI_TURN_REFINE，故对"任何没有点名品类的后续约束"都成立。
+        boolean namesNewCategory = hasValue(positivePatch.get("category")) || hasValue(positivePatch.get("subCategory"));
+        boolean accumulate = !namesNewCategory;
+        Map<String, Object> accumulatedConstraints = accumulate
                 ? mergeNonEmpty(source.accumulatedConstraints(), positivePatch)
                 : mergeNonEmpty(null, positivePatch);
-        Map<String, Object> negativeConstraints = refine
+        Map<String, Object> negativeConstraints = accumulate
                 ? mergeNonEmpty(source.negativeConstraints(), negativePatch)
                 : mergeNonEmpty(null, negativePatch);
-        String scenario = refine
+        String scenario = accumulate
                 ? nonBlankString(positivePatch.get("scenario"), source.scenario())
                 : nonBlankString(positivePatch.get("scenario"), null);
 
@@ -92,6 +110,23 @@ public final class AgentSessionStateMerger {
             history.add(source.current());
         }
         return new MultimodalState(current, history);
+    }
+
+    /**
+     * 是否推荐链路意图（会产生/细化商品推荐）。购物车、下单、闲聊、澄清、政策问答等不属于此类，
+     * 它们不应改写推荐上下文。未知意图按推荐处理（保守，仍走"未点名品类则继承"的逻辑）。
+     */
+    private boolean isRecommendationIntent(String activeIntent) {
+        if (activeIntent == null || activeIntent.isBlank()) {
+            return false;
+        }
+        return switch (activeIntent.toUpperCase(java.util.Locale.ROOT)) {
+            case "CART_MANAGE", "ADD_TO_CART", "REMOVE_FROM_CART", "UPDATE_CART_ITEM",
+                 "ORDER_MANAGE", "CREATE_ORDER", "CONFIRM_ORDER", "CANCEL_ORDER",
+                 "ORDER_QUERY", "LOGISTICS_QUERY",
+                 "SMALL_TALK", "OTHER", "CLARIFY", "UNKNOWN", "POLICY_QA" -> false;
+            default -> true;
+        };
     }
 
     private Map<String, Object> mergeNonEmpty(Map<String, Object> base, Map<String, Object> patch) {

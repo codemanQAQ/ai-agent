@@ -152,7 +152,27 @@ public class PositiveConstraintFilter {
                 return true;
             }
         }
-        return false;
+        // CJK 子序列：约束的汉字按序出现在类目路径里即视为命中，兼容缩略类目
+        // （如"跑鞋" ⊆ "跑步鞋"、"羽毛拍" ⊆ "羽毛球拍"），这类缩写既非连续子串、也无共同 bigram。
+        return isCjkSubsequence(expectedText, path);
+    }
+
+    /** needle 的汉字是否按顺序（可不连续）出现在 hay 中；少于 2 个汉字不参与（太宽松）。 */
+    private boolean isCjkSubsequence(String needle, String hay) {
+        if (needle == null || hay == null) {
+            return false;
+        }
+        String n = needle.replaceAll("[^\\u4e00-\\u9fff]", "");
+        if (n.length() < 2) {
+            return false;
+        }
+        int i = 0;
+        for (int c = 0; c < hay.length() && i < n.length(); c++) {
+            if (hay.charAt(c) == n.charAt(i)) {
+                i++;
+            }
+        }
+        return i == n.length();
     }
 
     private boolean matchesPrice(ProductRecallCandidate candidate, Map<String, Object> constraints) {
