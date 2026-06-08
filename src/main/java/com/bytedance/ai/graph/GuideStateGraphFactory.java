@@ -81,6 +81,8 @@ public class GuideStateGraphFactory {
             "下单流程没有被正确执行，请检查主图 workflow 路由。";
     private static final String CLARIFY_MESSAGE =
             "我暂时没能识别你的操作，请换一种说法，例如‘查看购物车’、‘添加商品到购物车’或‘结算购物车’。";
+    private static final String SMALL_TALK_MESSAGE =
+            "你好呀～我是你的导购助手 🛍️ 可以帮你推荐商品、对比挑选、加购和下单。想找点什么吗？";
     private static final String FAILURE_MESSAGE =
             "当前请求处理失败，请稍后重试，或换一种说法重新发送。";
     private static final String NO_BUSINESS_RESULT_MESSAGE =
@@ -1415,10 +1417,14 @@ public class GuideStateGraphFactory {
     }
 
     private GuideNodeExecutionResult clarifyWorkflow(OverAllState state) {
+        // 闲聊：给友好话术并把对话引回导购，而不是"没听懂"的澄清提示。
+        boolean smallTalk = GuideGraphStateValues.intent(state, GuideGraphStateKeys.INTENT)
+                .filter(intent -> intent == GuideGraphIntent.SMALL_TALK)
+                .isPresent();
         String message = MAIN_INTENT_LLM_TIMEOUT.equals(state.value(GuideGraphStateKeys.ERROR_CODE, ""))
                 || MAIN_INTENT_ROUTER_FAILED.equals(state.value(GuideGraphStateKeys.ERROR_CODE, ""))
                 ? "意图识别服务暂时超时，请重新发送一次。"
-                : CLARIFY_MESSAGE;
+                : (smallTalk ? SMALL_TALK_MESSAGE : CLARIFY_MESSAGE);
         message = state.value(GuideGraphStateKeys.NODE_MESSAGE)
                 .map(Object::toString)
                 .filter(value -> !value.isBlank())
