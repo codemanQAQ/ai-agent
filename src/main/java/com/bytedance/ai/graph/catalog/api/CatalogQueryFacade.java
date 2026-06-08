@@ -31,4 +31,12 @@ public interface CatalogQueryFacade {
      * 单独查询某 SPU 的 SKU 列表。
      */
     List<CatalogSkuView> listSkus(Long spuId);
+
+    /**
+     * 在售商品的去重顶级类目（category_path 的第一段）。用于动态生成意图/组合推荐里的类目清单，
+     * 避免把类目写死在 prompt 或代码里——扩充类目只需新增数据。
+     */
+    default List<String> listActiveTopCategories() {
+        return List.of();
+    }
 }

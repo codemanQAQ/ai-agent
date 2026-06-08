@@ -86,6 +86,7 @@ class ProductRecommendationModelTest {
                 candidate.title(),
                 candidate.brand(),
                 candidate.price(),
+                null,
                 candidate.stock(),
                 candidate.imageUrl(),
                 "150ml",

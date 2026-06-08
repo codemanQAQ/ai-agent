@@ -40,6 +40,9 @@ public interface CatalogSpuRepository {
 
     List<CatalogSpuRecord> searchActiveByKeyword(String keyword, int limit);
 
+    /** 在售商品去重的顶级类目（category_path 第一段），按字母序返回。 */
+    List<String> listActiveTopCategories();
+
     boolean decreaseStock(Long spuId, int quantity);
 
     /**

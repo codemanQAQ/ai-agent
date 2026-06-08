@@ -23,8 +23,19 @@ final class CatalogProductCandidateMapper {
         CatalogSkuView sku = firstAvailableSku(spu);
         String productId = StringUtils.hasText(spu.externalRef()) ? spu.externalRef() : String.valueOf(spu.id());
         String skuId = sku == null ? null : sku.skuCode();
-        BigDecimal price = sku != null && sku.price() != null ? sku.price() : spu.priceMin();
+        // 展示价用 SPU 最低价（"起"价），并把价格区间随 matchedSlots 透传，供卡片显示 109~129 这类区间，
+        // 避免多规格商品只显示某个 SKU 价而被误解为唯一价格。
+        BigDecimal price = spu.priceMin() != null ? spu.priceMin()
+                : (sku != null ? sku.price() : null);
         Integer stock = sku != null && sku.stock() != null ? sku.stock() : spu.stock();
+        Map<String, Object> slots = new java.util.LinkedHashMap<>(matchedSlots == null ? Map.of() : matchedSlots);
+        if (spu.priceMin() != null) {
+            slots.put("priceMin", spu.priceMin());
+        }
+        if (spu.priceMax() != null) {
+            slots.put("priceMax", spu.priceMax());
+        }
+        matchedSlots = slots;
         return new ProductRecallCandidate(
                 productId,
                 spu.id() == null ? null : String.valueOf(spu.id()),

@@ -98,7 +98,7 @@ targetWorkflow mapping:
 OTHER uses clarify_workflow only as an unsupported/out-of-scope fallback response. Workflow-internal follow-up questions are produced later by product/cart/order workflows.
 
 The downstream backend will validate intent, targetWorkflow, writeAction, slots, and missingSlots.
-When intent is SCENE_BUNDLE_RECOMMEND, decompose the scenario into 3-5 product roles and fill slots.bundleRoles, each as {"role": <短中文角色名>, "category": <类目>, "keywords": <空格分隔关键词>}. The "category" MUST be exactly one of: 美妆护肤, 服饰运动, 数码电子, 食品饮料 (pick the closest of these four). Example for "三亚度假从防晒到穿搭": [{"role":"防晒护肤","category":"美妆护肤","keywords":"防晒 补水"},{"role":"度假穿搭","category":"服饰运动","keywords":"穿搭 轻便"}]. For all other intents, leave bundleRoles as [].
+When intent is SCENE_BUNDLE_RECOMMEND, decompose the scenario into 3-5 product roles and fill slots.bundleRoles, each as {"role": <短中文角色名>, "category": <类目>, "keywords": <空格分隔关键词>}. The "category" MUST be exactly one of the platform's top categories: {{categories}} (pick the closest one for each role). Choose categories that actually fit the scenario — e.g. a baby outfit ("给婴儿配一套") should use the baby/maternity category for diapers/feeding/care, NOT force everything into beauty/clothing. Example for "三亚度假从防晒到穿搭": [{"role":"防晒护肤","category":"美妆护肤","keywords":"防晒 补水"},{"role":"度假穿搭","category":"服饰运动","keywords":"穿搭 轻便"}]. For all other intents, leave bundleRoles as [].
 
 Keep slots lightweight. Extract only constraints explicitly stated or strongly implied by the user.
 Do not use flat cartAction/orderAction/productRef fields at slots root. Put cart/order parameters under slots.action.

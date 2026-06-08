@@ -66,3 +66,6 @@ scripts/rag/.evidence/
 # Python 缓存
 __pycache__/
 *.pyc
+
+# 本地测试前端（不提交）
+src/main/resources/static/

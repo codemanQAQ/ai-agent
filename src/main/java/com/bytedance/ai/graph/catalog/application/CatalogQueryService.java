@@ -66,6 +66,11 @@ class CatalogQueryService implements CatalogQueryFacade {
                 .toList();
     }
 
+    @Override
+    public List<String> listActiveTopCategories() {
+        return spuRepository.listActiveTopCategories();
+    }
+
     private static CatalogSpuView toSpuView(CatalogSpuRecord record, List<CatalogSkuView> skus) {
         return new CatalogSpuView(
                 record.id(),

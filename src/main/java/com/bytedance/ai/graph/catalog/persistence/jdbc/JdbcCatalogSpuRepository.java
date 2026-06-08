@@ -164,6 +164,21 @@ public class JdbcCatalogSpuRepository implements CatalogSpuRepository {
     }
 
     @Override
+    public List<String> listActiveTopCategories() {
+        return jdbc.queryForList(
+                """
+                SELECT DISTINCT split_part(category_path, '/', 1) AS top
+                  FROM catalog_spu
+                 WHERE status = 'ACTIVE'
+                   AND category_path IS NOT NULL
+                   AND length(trim(category_path)) > 0
+                 ORDER BY top
+                """,
+                String.class
+        );
+    }
+
+    @Override
     public boolean decreaseStock(Long spuId, int quantity) {
         int updated = jdbc.update(
                 """

@@ -1243,6 +1243,7 @@ public class GuideStateGraphFactory {
         putIfPresent(map, "title", card.title());
         putIfPresent(map, "brand", card.brand());
         putIfPresent(map, "price", card.price());
+        putIfPresent(map, "priceMax", card.priceMax());
         putIfPresent(map, "stock", card.stock());
         putIfPresent(map, "imageUrl", card.imageUrl());
         putIfPresent(map, "spec", card.spec());
@@ -1287,6 +1288,7 @@ public class GuideStateGraphFactory {
         putIfPresent(map, "title", card.title());
         putIfPresent(map, "brand", card.brand());
         putIfPresent(map, "price", card.price());
+        putIfPresent(map, "priceMax", card.priceMax());
         putIfPresent(map, "stock", card.stock());
         putIfPresent(map, "spec", card.spec());
         putIfPresent(map, "recommendReason", card.recommendReason());

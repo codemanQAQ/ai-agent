@@ -6,15 +6,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
 @Component
 public class SceneBundlePlanner {
 
-    // 目录真实类目（LLM 给出的 bundleRoles.category 必须落在其中，否则无法按类目召回）。
-    private static final Set<String> VALID_CATEGORIES = Set.of("美妆护肤", "服饰运动", "数码电子", "食品饮料");
     // 场景 → 角色 缓存：相同/重复场景免重复计算（②）。
     private final Map<String, List<SceneBundleRole>> roleCache = new ConcurrentHashMap<>();
 
@@ -74,9 +71,11 @@ public class SceneBundlePlanner {
                 continue;
             }
             String category = firstText(raw.get("category"), raw.get("类目"));
-            if (category == null || !VALID_CATEGORIES.contains(category.trim())) {
-                continue;                                   // 类目非法 → 跳过，避免召回不到
+            if (category == null || category.isBlank()) {
+                continue;                                   // 无类目 → 跳过
             }
+            // 不再用写死的白名单限制类目：意图 prompt 已按目录真实类目动态约束 LLM 输出；
+            // 万一给了库里不存在的类目，按类目召回自然为空，不会出错。新增类目无需改这里。
             String name = firstText(raw.get("role"), raw.get("name"), raw.get("角色"), category);
             String keywords = firstText(raw.get("keywords"), raw.get("keyword"), raw.get("关键词"), name);
             roles.add(role("llm_role_" + idx++, name, keywords, category.trim(), baseConstraints));

@@ -10,6 +10,7 @@ public record ProductCard(
         String title,
         String brand,
         BigDecimal price,
+        BigDecimal priceMax,
         Integer stock,
         String imageUrl,
         String spec,
