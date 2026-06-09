@@ -34,7 +34,9 @@ class ProductRecallServicesTest {
     @Test
     void catalogKeywordRecallReturnsProductCandidates() {
         StubCatalogQueryFacade catalog = new StubCatalogQueryFacade(List.of(cleanser()));
-        ProductRecallService service = new CatalogKeywordProductRecallService(catalog);
+        CategorySynonymRegistry synonymRegistry = new CategorySynonymRegistry();
+        synonymRegistry.load();
+        ProductRecallService service = new CatalogKeywordProductRecallService(catalog, synonymRegistry);
 
         List<ProductRecallCandidate> candidates = service.recall(new ProductRecallRequest(context(
                 "推荐适合油皮的洗面奶",

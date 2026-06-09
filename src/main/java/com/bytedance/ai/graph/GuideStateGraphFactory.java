@@ -927,6 +927,10 @@ public class GuideStateGraphFactory {
                 .orElse(intent);
         ProductRecommendSubScene subScene = ProductRecommendSubScene.from(subIntent);
         ProductRecallPlan recallPlan = productRecommendStrategyPlanner.plan(subScene);
+        // 相对价格精修（"便宜点的"/"要个贵的旗舰"）：意图 LLM 不会把这类口语翻成价格界，
+        // 以上一轮推荐候选价格的中位数为锚点确定性调整——便宜→封顶到锚点(去下限)，更贵→以锚点为下限(去上限)。
+        queryContext = applyRelativePriceRefinement(
+                queryContext, sessionState, state.value(GuideGraphStateKeys.MESSAGE, ""));
 
         Map<String, Object> workflowResult = new LinkedHashMap<>();
         workflowResult.put("intent", intent.name());
@@ -961,6 +965,11 @@ public class GuideStateGraphFactory {
                 for (SceneBundleRole role : bundlePlan.roles()) {
                     UnifiedQueryContext roleContext = withSceneBundleRole(queryContext, bundlePlan, role);
                     List<ProductRecallCandidate> roleRecalled = productMultiRecallService.recall(roleContext, recallPlan);
+                    // 角色相关性收窄：关键词召回在有类目时用类目当关键词，会把整个类目（如"服饰运动"）召回、
+                    // 再由排序把不相关的（登山杖/防晒衣）排到前面，丢掉真正契合角色的（衬衫/西裤）。
+                    // 这里用角色自带的具体关键词（衬衫/西裤/皮鞋、奶瓶/纸尿裤…）过滤：标题/类目命中任一关键词才保留；
+                    // 全不命中则回退原召回（不把角色清空）。对 #13 通勤、#2 新生儿同类场景都通用。
+                    roleRecalled = filterByRoleKeywords(roleRecalled, role.query());
                     ProductCandidatePostProcessResult roleResult = productCandidatePostProcessor.process(
                             roleRecalled,
                             roleContext,
@@ -1373,6 +1382,122 @@ public class GuideStateGraphFactory {
     /**
      * 最高级单品指代方向：+1=要最贵/那款贵的，-1=要最便宜/最便宜的，0=非最高级（如"便宜点的"是相对精修，不在此处理）。
      */
+    /**
+     * 用角色关键词收窄召回：只保留标题或类目命中任一角色关键词（长度≥2）的候选；全不命中则返回空（该角色不出卡）。
+     * 用于组合场景每个角色按其具体词（衬衫/西裤/奶瓶/纸尿裤…）取相关候选，避免用整类目排序兜底塞入无关品类。
+     */
+    private List<ProductRecallCandidate> filterByRoleKeywords(
+            List<ProductRecallCandidate> candidates, String roleQuery) {
+        if (candidates == null || candidates.isEmpty() || roleQuery == null || roleQuery.isBlank()) {
+            return candidates == null ? List.of() : candidates;
+        }
+        // role.query 是空格分隔的关键词（"通勤 衬衫 西装 外套"），直接按空白切分取长度≥2 的词。
+        java.util.List<String> keys = java.util.Arrays.stream(roleQuery.trim().split("\\s+"))
+                .map(String::trim)
+                .filter(t -> t.length() >= 2)
+                .toList();
+        if (keys.isEmpty()) {
+            return candidates;
+        }
+        List<ProductRecallCandidate> kept = new ArrayList<>();
+        for (ProductRecallCandidate candidate : candidates) {
+            String hay = ((candidate.title() == null ? "" : candidate.title()) + " "
+                    + (candidate.categoryPath() == null ? "" : String.join("/", candidate.categoryPath())))
+                    .toLowerCase(java.util.Locale.ROOT);
+            for (String key : keys) {
+                if (hay.contains(key.toLowerCase(java.util.Locale.ROOT))) {
+                    kept.add(candidate);
+                    break;
+                }
+            }
+        }
+        return kept; // 无命中即返回空：该角色宁可不出卡，也不拿无关品类（防晒衣/登山杖）冒充
+    }
+
+    /**
+     * 相对价格方向：-1 想更便宜、+1 想更贵、0 无相对价格诉求。
+     * 注意"太贵"表达的是嫌贵→要更便宜；"贵/旗舰/高端"是要更贵。带具体数字（"8000以上"）的视为显式价格，不在此处理。
+     */
+    private int relativePriceDirection(String message) {
+        if (message == null || message.isBlank()) {
+            return 0;
+        }
+        boolean cheaper = message.contains("便宜") || message.contains("太贵") || message.contains("划算")
+                || message.contains("实惠") || message.contains("性价比") || message.contains("平价")
+                || message.contains("便宜点") || message.contains("省点") || message.contains("预算有限");
+        boolean pricier = message.contains("高端") || message.contains("高档") || message.contains("旗舰")
+                || message.contains("顶配") || message.contains("高配") || message.contains("上档次")
+                || message.contains("好一点") || message.contains("好点") || message.contains("高级")
+                || message.contains("升级") || message.contains("豪华")
+                || (message.contains("贵") && !message.contains("太贵") && !message.contains("不贵"));
+        if (cheaper && !pricier) {
+            return -1;
+        }
+        if (pricier && !cheaper) {
+            return 1;
+        }
+        return 0;
+    }
+
+    /**
+     * 相对价格精修：以上一轮推荐候选价格中位数为锚点调整价格界。便宜→priceMax=锚点(去 priceMin)，
+     * 更贵→priceMin=锚点(去 priceMax)。仅当本轮没有显式数字价格、且上一轮确有带价候选时生效。
+     */
+    private UnifiedQueryContext applyRelativePriceRefinement(
+            UnifiedQueryContext queryContext, AgentSessionState sessionState, String message) {
+        if (queryContext == null || sessionState == null) {
+            return queryContext;
+        }
+        int direction = relativePriceDirection(message);
+        if (direction == 0 || (message != null && message.matches(".*\\d{3,}.*"))) {
+            return queryContext; // 无相对诉求，或本轮已给具体数字价格（交给显式价格逻辑）
+        }
+        CandidateSnapshot snapshot = sessionState.recommendationState() == null
+                ? null : sessionState.recommendationState().candidateSnapshot();
+        if (snapshot == null || snapshot.items().isEmpty()) {
+            return queryContext;
+        }
+        List<java.math.BigDecimal> prices = snapshot.items().stream()
+                .map(com.bytedance.ai.graph.session.CandidateSnapshotItem::price)
+                .filter(java.util.Objects::nonNull)
+                .sorted()
+                .toList();
+        if (prices.isEmpty()) {
+            return queryContext;
+        }
+        java.math.BigDecimal anchor = prices.get(prices.size() / 2); // 中位数（偶数取上中位，偏保守）
+        Map<String, Object> constraints = new LinkedHashMap<>(queryContext.positiveConstraints());
+        if (direction < 0) {
+            constraints.put("priceMax", anchor);
+            constraints.remove("priceMin");
+        } else {
+            constraints.put("priceMin", anchor);
+            constraints.remove("priceMax");
+        }
+        return withPositiveConstraints(queryContext, constraints);
+    }
+
+    /** 复制 queryContext 仅替换 positiveConstraints。 */
+    private UnifiedQueryContext withPositiveConstraints(
+            UnifiedQueryContext queryContext, Map<String, Object> positiveConstraints) {
+        return new UnifiedQueryContext(
+                queryContext.schemaVersion(),
+                queryContext.intent(),
+                queryContext.queryText(),
+                queryContext.inputModalities(),
+                queryContext.imageRef(),
+                queryContext.imageCaption(),
+                queryContext.imageEmbeddingRef(),
+                positiveConstraints,
+                queryContext.negativeConstraints(),
+                queryContext.scope(),
+                queryContext.candidateSnapshot(),
+                queryContext.needClarify(),
+                queryContext.missingSlots(),
+                queryContext.clarifyQuestion()
+        );
+    }
+
     private int superlativeDirection(String message) {
         if (message == null || message.isBlank() || message.contains("点")) {
             return 0; // "便宜点/贵点" 是相对调整，不当作最高级

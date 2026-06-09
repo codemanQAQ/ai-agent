@@ -15,9 +15,14 @@ import org.springframework.stereotype.Service;
 public class CatalogKeywordProductRecallService implements ProductRecallService {
 
     private final CatalogQueryFacade catalogQueryFacade;
+    private final CategorySynonymRegistry synonymRegistry;
 
-    public CatalogKeywordProductRecallService(CatalogQueryFacade catalogQueryFacade) {
+    public CatalogKeywordProductRecallService(
+            CatalogQueryFacade catalogQueryFacade,
+            CategorySynonymRegistry synonymRegistry
+    ) {
         this.catalogQueryFacade = catalogQueryFacade;
+        this.synonymRegistry = synonymRegistry;
     }
 
     @Override
@@ -71,9 +76,21 @@ public class CatalogKeywordProductRecallService implements ProductRecallService 
         if (keyword == null) {
             return List.of();
         }
-        return catalogQueryFacade.searchActiveSpus(keyword, request.limit()).stream()
-                .map(spu -> toCandidate(spu, keyword))
-                .toList();
+        // 同义词桥接：用户口语词与目录用词不一致时（"洗面奶" vs 目录"洁面乳/洁面"），
+        // 对同组等价词分别检索再合并，避免单一关键词 LIKE 漏召。原词命中优先（排在前）。
+        List<String> keywords = synonymRegistry.expand(keyword);
+        if (keywords.size() <= 1) {
+            return catalogQueryFacade.searchActiveSpus(keyword, request.limit()).stream()
+                    .map(spu -> toCandidate(spu, keyword))
+                    .toList();
+        }
+        Map<String, ProductRecallCandidate> merged = new LinkedHashMap<>();
+        for (String alias : keywords) {
+            for (CatalogSpuView spu : catalogQueryFacade.searchActiveSpus(alias, request.limit())) {
+                merged.computeIfAbsent(String.valueOf(spu.id()), k -> toCandidate(spu, alias));
+            }
+        }
+        return List.copyOf(merged.values());
     }
 
     /**

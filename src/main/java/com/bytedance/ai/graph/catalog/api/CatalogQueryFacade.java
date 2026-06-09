@@ -1,5 +1,6 @@
 package com.bytedance.ai.graph.catalog.api;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,6 +25,13 @@ public interface CatalogQueryFacade {
      * PostgreSQL/catalog 关键词搜索，供购物车等写操作解析商品名时使用。
      */
     default List<CatalogSpuView> searchActiveSpus(String keyword, int limit) {
+        return List.of();
+    }
+
+    /**
+     * 按价格区间浏览在售商品（无类目/关键词时的兜底，如"送礼 预算500"）。min/max 任一 null 表示不限该侧。
+     */
+    default List<CatalogSpuView> browseActiveSpusByPrice(BigDecimal priceMin, BigDecimal priceMax, int limit) {
         return List.of();
     }
 

@@ -34,18 +34,43 @@ public class CatalogStructuredFilterProductRecallService implements ProductRecal
             return List.of();
         }
         Map<String, Object> constraints = context.positiveConstraints();
+        // 结构化关键词只取【类目/品牌】，不混 queryText：否则"预算500"这类整句会被当成关键词去 LIKE，
+        // 既搜不到东西、又绕过下面的价格浏览兜底。queryText 的模糊召回交给 CATALOG_KEYWORD 源。
         String keyword = ProductRecallTextTokenizer.bestKeyword(
-                null,
-                Arrays.asList(
-                        text(firstPresent(constraints, "category", "categoryPath", "类目")),
-                        text(firstPresent(constraints, "brand", "品牌")),
-                        context.queryText()
-                )
+                text(firstPresent(constraints, "category", "categoryPath", "类目")),
+                Arrays.asList(text(firstPresent(constraints, "brand", "品牌")))
         );
-        if (!StringUtils.hasText(keyword)) {
-            return List.of();
-        }
         int searchLimit = Math.max(request.limit() * 4, request.limit());
+        // 无可用类目/品牌关键词，但给了价格（如"送礼 预算500"）：按价格区间浏览兜底，避免直接 0 召回。
+        // 仍过 match() 走价格/库存/规格校验，结果按价格升序由仓储给出，下游再融合排序。
+        if (!StringUtils.hasText(keyword)) {
+            BigDecimal min = decimal(firstPresent(constraints, "priceMin", "minPrice", "价格下限"));
+            BigDecimal max = decimal(firstPresent(constraints, "priceMax", "maxPrice", "预算", "价格上限"));
+            if (min == null && max == null) {
+                return List.of();
+            }
+            return catalogQueryFacade.browseActiveSpusByPrice(min, max, searchLimit).stream()
+                    .map(spu -> match(spu, constraints))
+                    .filter(MatchedSpu::matched)
+                    .limit(request.limit())
+                    .map(match -> CatalogProductCandidateMapper.toCandidate(
+                            match.spu(),
+                            source(),
+                            0.6d + Math.min(match.matchedSlots().size(), 5) * 0.05d,
+                            match.matchedSlots(),
+                            List.of(new ProductRecallEvidence(
+                                    source(),
+                                    "catalog_price_browse",
+                                    match.spu().title(),
+                                    "Catalog price-range browse",
+                                    null,
+                                    null,
+                                    productId(match.spu()),
+                                    match.matchedSlots()
+                            ))
+                    ))
+                    .toList();
+        }
         return catalogQueryFacade.searchActiveSpus(keyword, searchLimit).stream()
                 .map(spu -> match(spu, constraints))
                 .filter(MatchedSpu::matched)

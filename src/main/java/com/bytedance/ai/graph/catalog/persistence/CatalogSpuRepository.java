@@ -40,6 +40,12 @@ public interface CatalogSpuRepository {
 
     List<CatalogSpuRecord> searchActiveByKeyword(String keyword, int limit);
 
+    /**
+     * 按价格区间浏览在售商品（无关键词/类目时的兜底，如"送礼 预算500"）。
+     * min/max 任一为 null 表示该侧不限；跨多类目按价格升序返回，便于下游多样化与预算贴合。
+     */
+    List<CatalogSpuRecord> browseActiveByPrice(BigDecimal priceMin, BigDecimal priceMax, int limit);
+
     /** 在售商品去重的顶级类目（category_path 第一段），按字母序返回。 */
     List<String> listActiveTopCategories();
 

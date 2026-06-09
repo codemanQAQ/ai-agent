@@ -164,6 +164,28 @@ public class JdbcCatalogSpuRepository implements CatalogSpuRepository {
     }
 
     @Override
+    public List<CatalogSpuRecord> browseActiveByPrice(BigDecimal priceMin, BigDecimal priceMax, int limit) {
+        int safeLimit = limit <= 0 ? 5 : Math.min(limit, 50);
+        // 区间相交判定：商品[price_min,price_max] 与 约束[min,max] 有交集即入选。
+        // 任一侧约束为 null 走 (? IS NULL) 短路，不限该侧。无类目浏览（如"送礼 预算500"）按价格【降序】+
+        // 库存优先：预算内更"体面"的商品优先（精华/香水优于 4 元酱油），更贴合送礼/无品类探索语义。
+        return jdbc.query(
+                """
+                SELECT * FROM catalog_spu
+                 WHERE status = 'ACTIVE'
+                   AND (?::numeric IS NULL OR coalesce(price_max, price_min) >= ?::numeric)
+                   AND (?::numeric IS NULL OR price_min <= ?::numeric)
+                 ORDER BY (stock > 0) DESC, coalesce(price_max, price_min) DESC, id ASC
+                 LIMIT ?
+                """,
+                rowMapper(),
+                priceMin, priceMin,
+                priceMax, priceMax,
+                safeLimit
+        );
+    }
+
+    @Override
     public List<String> listActiveTopCategories() {
         return jdbc.queryForList(
                 """

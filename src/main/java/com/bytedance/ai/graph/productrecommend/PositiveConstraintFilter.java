@@ -11,6 +11,23 @@ import org.springframework.util.StringUtils;
 @Service
 public class PositiveConstraintFilter {
 
+    private final CategorySynonymRegistry synonymRegistry;
+
+    public PositiveConstraintFilter(CategorySynonymRegistry synonymRegistry) {
+        this.synonymRegistry = synonymRegistry;
+    }
+
+    /** 便捷构造（非 Spring 装配路径，如单测/手动构造）：自建并加载同义词表。 */
+    public PositiveConstraintFilter() {
+        this(defaultRegistry());
+    }
+
+    private static CategorySynonymRegistry defaultRegistry() {
+        CategorySynonymRegistry registry = new CategorySynonymRegistry();
+        registry.load();
+        return registry;
+    }
+
     public ProductCandidateFilterResult filter(
             List<ProductRecallCandidate> candidates,
             Map<String, Object> positiveConstraints
@@ -143,18 +160,34 @@ public class PositiveConstraintFilter {
         String path = categoryPath == null ? "" : String.join("/", categoryPath);
         String leaf = categoryPath == null || categoryPath.isEmpty()
                 ? null : categoryPath.get(categoryPath.size() - 1);
+        // 同义词桥接：用户用词与目录用词可能不同（"洗面奶" vs 目录"洁面乳/洁面"）。
+        // 把约束词扩成同组等价词，任一形式命中即视为满足类目。原词排首位，先按原词判定。
+        java.util.List<String> aliases = synonymRegistry.expand(expectedText);
         if (!StringUtils.hasText(path)) {
-            return containsIgnoreCase(candidate.title(), expectedText);
+            for (String alias : aliases) {
+                if (containsIgnoreCase(candidate.title(), alias)) {
+                    return true;
+                }
+            }
+            return false;
         }
         // 1) 子串匹配用【完整路径】：兼容顶级类目约束（"母婴用品" ⊂ "母婴用品/纸尿裤"）与
-        //    叶子子串（"手机" ⊂ "数码电子/智能手机"）。
-        if (containsIgnoreCase(path, expectedText)) {
-            return true;
+        //    叶子子串（"手机" ⊂ "数码电子/智能手机"）；同义词形式同样按子串判定。
+        for (String alias : aliases) {
+            if (containsIgnoreCase(path, alias)) {
+                return true;
+            }
         }
         // 2) bigram / 子序列只对【叶子类目】判定——避免顶级类目（如"服饰运动"含"运动"）把
         //    "运动裤"误命中到全部服饰运动商品；同时兼容同义/缩略叶子：
         //    蓝牙耳机 ~ 真无线耳机（共 耳机）、运动裤 ⊆ 运动长裤、跑鞋 ⊆ 跑步鞋。
         if (StringUtils.hasText(leaf)) {
+            // 同义组直接等价（"洗面奶" ~ 叶子"洁面"），无需共享 token。
+            for (String alias : aliases) {
+                if (synonymRegistry.equivalent(alias, leaf)) {
+                    return true;
+                }
+            }
             java.util.Set<String> have = ProductRecallTextTokenizer.tokens(leaf);
             for (String term : ProductRecallTextTokenizer.tokens(expectedText)) {
                 if (term.length() >= 2 && have.contains(term)) {

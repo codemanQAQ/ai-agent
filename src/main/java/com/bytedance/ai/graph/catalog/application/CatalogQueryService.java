@@ -60,6 +60,20 @@ class CatalogQueryService implements CatalogQueryFacade {
     }
 
     @Override
+    public List<CatalogSpuView> browseActiveSpusByPrice(
+            java.math.BigDecimal priceMin, java.math.BigDecimal priceMax, int limit) {
+        int safeLimit = limit <= 0 ? 5 : Math.min(limit, 50);
+        return spuRepository.browseActiveByPrice(priceMin, priceMax, safeLimit).stream()
+                .map(record -> {
+                    List<CatalogSkuView> skuViews = skuRepository.findBySpuId(record.id()).stream()
+                            .map(CatalogQueryService::toSkuView)
+                            .toList();
+                    return toSpuView(record, skuViews);
+                })
+                .toList();
+    }
+
+    @Override
     public List<CatalogSkuView> listSkus(Long spuId) {
         return skuRepository.findBySpuId(spuId).stream()
                 .map(CatalogQueryService::toSkuView)
