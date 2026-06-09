@@ -280,9 +280,10 @@ public class CartManageSubgraphFactory {
         if (!StringUtils.hasText(text)) {
             return false;
         }
+        // 注意：不要放"购物车"——它会误命中"加入购物车/查看购物车"等常规指令；"购物车里的那个"已由"那个"覆盖。
         for (String token : new String[]{
                 "之前", "刚才", "刚刚", "刚加", "刚买", "那个", "这个", "那款", "这款",
-                "那件", "这件", "购物车", "同样", "一样", "上面", "前面", "同款"}) {
+                "那件", "这件", "同样", "一样", "上面", "前面", "同款"}) {
             if (text.contains(token)) {
                 return true;
             }
@@ -394,6 +395,14 @@ public class CartManageSubgraphFactory {
                 filledSlots.itemIndex()
         );
         CandidateSnapshotItem snapshotItem = resolveCandidateSnapshotItem(state, actionTargetRef, snapshotIndexHint);
+        // 加购但没按序号/指代定位到具体商品时，从最近推荐快照兜底：
+        //   - "便宜的那款/贵的那款"等最高级 → 按价格取最低/最高一款（#7）；
+        //   - 纯"加入购物车"（无序号、无"这个"、无"再买"）→ 默认加最相关的首款推荐（#12）。
+        // "再买/又买/这个"等仍交给后续既有逻辑（改数量 / 指代解析），此处不抢。
+        if (snapshotItem == null && action == CartAction.ADD) {
+            snapshotItem = resolveAddFallbackFromSnapshot(state,
+                    firstNonBlank(actionTargetRef, "") + " " + userMessage);
+        }
         String snapshotProductId = snapshotItem == null ? null : snapshotItem.productId();
         String snapshotSkuId = snapshotItem == null ? null : snapshotItem.skuId();
         String productName = firstNonBlank(
@@ -1410,6 +1419,66 @@ public class CartManageSubgraphFactory {
             return items.get(index - 1);
         }
         return new CandidateSnapshotItem(index, productId, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * 加购兜底解析：最高级("便宜的/贵的")→按价格取；纯裸加购→取推荐首款；"再买/又买/这个"等返回 null
+     * 交给既有逻辑（改数量 / 序号指代）。
+     */
+    private CandidateSnapshotItem resolveAddFallbackFromSnapshot(OverAllState state, String message) {
+        List<CandidateSnapshotItem> items = state.value(GuideGraphStateKeys.AGENT_SESSION_STATE, AgentSessionState.class)
+                .map(AgentSessionState::recommendationState)
+                .map(rec -> rec == null ? CandidateSnapshot.empty() : rec.candidateSnapshot())
+                .orElse(CandidateSnapshot.empty())
+                .items();
+        if (items == null || items.isEmpty()) {
+            return null;
+        }
+        int dir = superlativeDirection(message);
+        if (dir != 0) {
+            return pickByPrice(items, dir);
+        }
+        // 让"再买/又买/再加"（改数量）与"这个/那款"（指代解析）走各自既有逻辑，裸加购才默认首款。
+        if (isAddMorePhrase(message) || isExistingItemReference(message)) {
+            return null;
+        }
+        return items.get(0);
+    }
+
+    /** 按价格取快照项：dir>0 取最贵，dir<0 取最便宜；无价者忽略。 */
+    private CandidateSnapshotItem pickByPrice(List<CandidateSnapshotItem> items, int dir) {
+        CandidateSnapshotItem best = null;
+        for (CandidateSnapshotItem item : items) {
+            if (item == null || item.price() == null) {
+                continue;
+            }
+            if (best == null
+                    || (dir > 0 && item.price().compareTo(best.price()) > 0)
+                    || (dir < 0 && item.price().compareTo(best.price()) < 0)) {
+                best = item;
+            }
+        }
+        return best;
+    }
+
+    /** +1=要贵的/最贵，-1=要便宜的/最便宜，0=非最高级（"便宜点的"相对精修不在此处理）。 */
+    private int superlativeDirection(String message) {
+        if (message == null || message.isBlank() || message.contains("点")) {
+            return 0;
+        }
+        boolean expensive = message.contains("最贵") || message.contains("最高端")
+                || (message.contains("贵") && (message.contains("那款") || message.contains("那个")
+                        || message.contains("这款") || message.contains("最") || message.contains("要")));
+        boolean cheap = message.contains("最便宜") || message.contains("最划算")
+                || (message.contains("便宜") && (message.contains("那款") || message.contains("那个")
+                        || message.contains("这款") || message.contains("最") || message.contains("要")));
+        if (expensive && !cheap) {
+            return 1;
+        }
+        if (cheap && !expensive) {
+            return -1;
+        }
+        return 0;
     }
 
     private int parseSnapshotReferenceIndex(String targetRef, int candidateCount) {
