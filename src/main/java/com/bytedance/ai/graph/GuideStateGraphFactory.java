@@ -948,10 +948,10 @@ public class GuideStateGraphFactory {
             ProductCandidatePostProcessResult postProcessResult;
             // 本轮是否在引用上一轮某序号商品（"第N款评价怎么样/详情/价格"）——若是，则把候选锁定到那一款，
             // 而不是按品类重新推荐一遍。声明在此，后处理后用于过滤 + 保留原快照（支持继续问"第N款"）。
-            com.bytedance.ai.graph.session.CandidateSnapshotItem referencedItem =
-                    (subScene == ProductRecommendSubScene.SCENE_BUNDLE_RECOMMEND
-                            || subScene == ProductRecommendSubScene.PRODUCT_COMPARE) ? null
-                            : referencedSnapshotItem(state, sessionState);
+            // 本轮引用上一轮推荐里的哪些项（"第1款"、"对比第1款和第2款"、"这两款"…）。组合场景不处理。
+            List<com.bytedance.ai.graph.session.CandidateSnapshotItem> referencedItems =
+                    subScene == ProductRecommendSubScene.SCENE_BUNDLE_RECOMMEND ? List.of()
+                            : referencedSnapshotItems(state, sessionState);
             if (subScene == ProductRecommendSubScene.SCENE_BUNDLE_RECOMMEND) {
                 SceneBundlePlan bundlePlan = sceneBundlePlanner.plan(queryContext, bundleRolesFromState(state));
                 List<Map<String, Object>> roleResults = new ArrayList<>();
@@ -991,22 +991,60 @@ public class GuideStateGraphFactory {
                         recallPlan.outputLimit()
                 );
             }
-            // 锁定到被引用的那一款：从同品类召回结果里按 productId 筛出它，避免把其它商品又推一遍。
-            // 万一这一轮没召回到它（极少），用上一轮快照项兜底建一张卡，至少聚焦正确的商品。
+            // 锁定到被引用的那些项：按 productId 从召回结果里逐项命中（保持引用顺序），
+            // 召回没命中的用上一轮快照项兜底建卡。这样"第N款/对比第1款和第2款/这两款"都只出被引用的商品。
             List<ProductRecallCandidate> finalCandidates = postProcessResult.candidates();
-            if (referencedItem != null) {
-                List<ProductRecallCandidate> scoped = finalCandidates.stream()
-                        .filter(candidate -> matchesSnapshotItem(candidate, referencedItem))
-                        .toList();
-                finalCandidates = scoped.isEmpty()
-                        ? List.of(candidateFromSnapshotItem(referencedItem))
-                        : scoped;
+            if (!referencedItems.isEmpty()) {
+                List<ProductRecallCandidate> scoped = new ArrayList<>();
+                for (com.bytedance.ai.graph.session.CandidateSnapshotItem item : referencedItems) {
+                    ProductRecallCandidate match = finalCandidates.stream()
+                            .filter(candidate -> matchesSnapshotItem(candidate, item))
+                            .findFirst()
+                            .orElse(null);
+                    scoped.add(match != null ? match : candidateFromSnapshotItem(item));
+                }
+                finalCandidates = scoped;
+            } else if (subScene == ProductRecommendSubScene.PRODUCT_COMPARE) {
+                // 按品牌/商品名对比（"对比珀莱雅和科颜氏"）：只保留被点名的，剔除召回顺带带进来的其它品牌。
+                List<String> refs = stringList(queryContext.positiveConstraints().get("productRefs"));
+                if (!refs.isEmpty()) {
+                    List<ProductRecallCandidate> scoped = finalCandidates.stream()
+                            .filter(candidate -> matchesAnyRef(candidate, refs))
+                            .toList();
+                    if (!scoped.isEmpty()) {
+                        finalCandidates = scoped;
+                    }
+                }
+            } else if (sessionState.recommendationState().candidateSnapshot() != null
+                    && !sessionState.recommendationState().candidateSnapshot().items().isEmpty()) {
+                // 最高级单品指代（在已有推荐基础上）："那款贵的/最贵的" → 价最高一款；"最便宜的" → 价最低一款。
+                int direction = superlativeDirection(state.value(GuideGraphStateKeys.MESSAGE, ""));
+                if (direction != 0) {
+                    List<ProductRecallCandidate> priced = finalCandidates.stream()
+                            .filter(candidate -> candidate.price() != null)
+                            .toList();
+                    if (!priced.isEmpty()) {
+                        java.util.Comparator<ProductRecallCandidate> byPrice =
+                                java.util.Comparator.comparing(ProductRecallCandidate::price);
+                        ProductRecallCandidate pick = direction > 0
+                                ? priced.stream().max(byPrice).orElseThrow()
+                                : priced.stream().min(byPrice).orElseThrow();
+                        finalCandidates = List.of(pick);
+                    }
+                }
             }
             List<ProductCard> productCards = productCardMapper.toCards(finalCandidates);
-            // 引用既有商品的询问轮：保留上一轮的候选快照，确保后续还能继续按"第N款"指代。
-            CandidateSnapshot candidateSnapshot = referencedItem != null
-                    ? sessionState.recommendationState().candidateSnapshot()
-                    : postProcessResult.candidateSnapshot();
+            // 引用既有商品的轮次（序号/数量/对比）：保留上一轮候选快照，避免被这一轮的子集覆盖，
+            // 否则后续"第N款"会错位（#5）。仅在确有上一轮快照时保留，否则用本轮结果。
+            CandidateSnapshot previousSnapshot = sessionState.recommendationState().candidateSnapshot();
+            boolean hasPreviousList = previousSnapshot != null && !previousSnapshot.items().isEmpty();
+            boolean referencingExistingList = !referencedItems.isEmpty()
+                    || subScene == ProductRecommendSubScene.PRODUCT_COMPARE
+                    || (hasPreviousList && superlativeDirection(state.value(GuideGraphStateKeys.MESSAGE, "")) != 0);
+            CandidateSnapshot candidateSnapshot =
+                    referencingExistingList && previousSnapshot != null && !previousSnapshot.items().isEmpty()
+                            ? previousSnapshot
+                            : postProcessResult.candidateSnapshot();
 
             workflowResult.put("products", productCards.stream().map(this::productCardMap).toList());
             if (subScene == ProductRecommendSubScene.PRODUCT_COMPARE) {
@@ -1276,36 +1314,110 @@ public class GuideStateGraphFactory {
      * 本轮是否在用序号/指代引用上一轮推荐里的某个商品（如"第1款评价怎么样"、"第二个详情"）。
      * 已经是指名/对比（已有 productRefs）的不处理；解析到序号且上一轮快照里有该项时返回该项，否则 null。
      */
-    private com.bytedance.ai.graph.session.CandidateSnapshotItem referencedSnapshotItem(
+    /**
+     * 本轮消息引用了上一轮推荐里的哪些项，按引用顺序返回。支持：
+     *   - 多个序号："第1款"、"对比第1款和第2款"；
+     *   - 数量指代："这两款"、"前3款"、"这几款/这些"（取前 N / 全部）。
+     * 不引用既有项时返回空列表。序号以消息为准（不依赖 LLM 可能误塞的 productRefs）。
+     */
+    private List<com.bytedance.ai.graph.session.CandidateSnapshotItem> referencedSnapshotItems(
             OverAllState state, AgentSessionState sessionState) {
         if (sessionState == null || sessionState.recommendationState() == null) {
-            return null;
+            return List.of();
         }
         CandidateSnapshot snapshot = sessionState.recommendationState().candidateSnapshot();
         if (snapshot == null || snapshot.items() == null || snapshot.items().isEmpty()) {
-            return null;
+            return List.of();
         }
-        // 以本轮消息里的序号为准（LLM 有时会把"第一款"误塞进 productRefs，故不依赖它），
-        // 从上一轮真实推荐快照里取对应项。
+        List<com.bytedance.ai.graph.session.CandidateSnapshotItem> items = snapshot.items();
         String message = state.value(GuideGraphStateKeys.MESSAGE, "");
-        int index = parseOrdinalReference(message, snapshot.items().size());
-        if (index < 1 || index > snapshot.items().size()) {
-            return null;
+        // 1) 显式序号（可多个）
+        java.util.LinkedHashSet<Integer> indexes = new java.util.LinkedHashSet<>();
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("第\\s*([0-9]+|[一二三四五六七八九十])\\s*(款|个|种|件|位|项)?").matcher(message);
+        while (matcher.find()) {
+            int n = chineseOrArabicToInt(matcher.group(1));
+            if (n >= 1 && n <= items.size()) {
+                indexes.add(n);
+            }
         }
-        return snapshot.items().get(index - 1);
+        if (!indexes.isEmpty()) {
+            return indexes.stream().map(i -> items.get(i - 1)).toList();
+        }
+        // 2) 数量指代
+        int qty = parseQuantityReference(message, items.size());
+        if (qty >= 1) {
+            return List.copyOf(items.subList(0, Math.min(qty, items.size())));
+        }
+        return List.of();
     }
 
-    /** 解析"第N款/第N个/第N种/第N件/第N位"里的序号（支持阿拉伯数字与一~十）；无则返回 -1。 */
-    private int parseOrdinalReference(String message, int max) {
+    /** "这两款/前3款/这几款/这些"等数量指代 → 取前 N（或全部）；无则 -1。 */
+    private int parseQuantityReference(String message, int max) {
         if (message == null || message.isBlank()) {
             return -1;
         }
         java.util.regex.Matcher matcher =
-                java.util.regex.Pattern.compile("第\\s*([0-9]+|[一二三四五六七八九十])\\s*(款|个|种|件|位|项)?").matcher(message);
-        if (!matcher.find()) {
+                java.util.regex.Pattern.compile("(这|前|头)\\s*(全部|[0-9]+|[两二三四五六七八九十])\\s*(款|个|种|件)").matcher(message);
+        if (matcher.find()) {
+            String token = matcher.group(2);
+            int n = "两".equals(token) ? 2 : ("全部".equals(token) ? max : chineseOrArabicToInt(token));
+            return n;
+        }
+        if (message.contains("这些") || message.contains("这几款") || message.contains("这几个") || message.contains("全部")) {
+            return max;
+        }
+        return -1;
+    }
+
+    /**
+     * 最高级单品指代方向：+1=要最贵/那款贵的，-1=要最便宜/最便宜的，0=非最高级（如"便宜点的"是相对精修，不在此处理）。
+     */
+    private int superlativeDirection(String message) {
+        if (message == null || message.isBlank() || message.contains("点")) {
+            return 0; // "便宜点/贵点" 是相对调整，不当作最高级
+        }
+        boolean expensive = message.contains("最贵") || message.contains("最高端") || message.contains("价格最高")
+                || (message.contains("贵") && (message.contains("那款") || message.contains("那个")
+                        || message.contains("这款") || message.contains("最")));
+        boolean cheap = message.contains("最便宜") || message.contains("价格最低") || message.contains("最划算")
+                || (message.contains("便宜") && (message.contains("那款") || message.contains("那个")
+                        || message.contains("这款") || message.contains("最")));
+        if (expensive && !cheap) {
+            return 1;
+        }
+        if (cheap && !expensive) {
             return -1;
         }
-        return chineseOrArabicToInt(matcher.group(1));
+        return 0;
+    }
+
+    /** 候选的品牌/标题是否包含任一被点名的商品/品牌（用于"对比A和B"卡片收窄）。 */
+    private boolean matchesAnyRef(ProductRecallCandidate candidate, List<String> refs) {
+        if (candidate == null) {
+            return false;
+        }
+        String hay = ((candidate.brand() == null ? "" : candidate.brand()) + " "
+                + (candidate.title() == null ? "" : candidate.title())).toLowerCase();
+        for (String ref : refs) {
+            if (ref != null && !ref.isBlank() && hay.contains(ref.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        for (Object item : list) {
+            if (item != null && !String.valueOf(item).isBlank()) {
+                result.add(String.valueOf(item).trim());
+            }
+        }
+        return result;
     }
 
     private int chineseOrArabicToInt(String token) {
