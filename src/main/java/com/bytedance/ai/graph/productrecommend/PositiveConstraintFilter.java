@@ -139,22 +139,27 @@ public class PositiveConstraintFilter {
         if (!StringUtils.hasText(expectedText)) {
             return true;
         }
-        String path = String.join("/", candidate.categoryPath());
-        if (!StringUtils.hasText(path)) {
+        // 只按【叶子类目】（路径最后一段，即商品的具体品类）判定，不拿顶级类目参与匹配——
+        // 否则"运动裤"会因顶级"服饰运动"含 bigram"运动"而误命中所有 服饰运动 商品（T恤/卫衣等）。
+        List<String> categoryPath = candidate.categoryPath();
+        String leaf = categoryPath == null || categoryPath.isEmpty()
+                ? null : categoryPath.get(categoryPath.size() - 1);
+        if (!StringUtils.hasText(leaf)) {
             return containsIgnoreCase(candidate.title(), expectedText);
         }
-        if (containsIgnoreCase(path, expectedText)) {
+        // 1) 直接包含（手机 ⊂ 智能手机）
+        if (containsIgnoreCase(leaf, expectedText)) {
             return true;
         }
-        java.util.Set<String> have = ProductRecallTextTokenizer.tokens(path);
+        // 2) bigram 重叠：兼容同义类目（蓝牙耳机 ~ 真无线耳机，共 耳机）
+        java.util.Set<String> have = ProductRecallTextTokenizer.tokens(leaf);
         for (String term : ProductRecallTextTokenizer.tokens(expectedText)) {
             if (term.length() >= 2 && have.contains(term)) {
                 return true;
             }
         }
-        // CJK 子序列：约束的汉字按序出现在类目路径里即视为命中，兼容缩略类目
-        // （如"跑鞋" ⊆ "跑步鞋"、"羽毛拍" ⊆ "羽毛球拍"），这类缩写既非连续子串、也无共同 bigram。
-        return isCjkSubsequence(expectedText, path);
+        // 3) CJK 子序列：兼容缩略类目（运动裤 ⊆ 运动长裤、跑鞋 ⊆ 跑步鞋、羽毛拍 ⊆ 羽毛球拍）
+        return isCjkSubsequence(expectedText, leaf);
     }
 
     /** needle 的汉字是否按顺序（可不连续）出现在 hay 中；少于 2 个汉字不参与（太宽松）。 */
