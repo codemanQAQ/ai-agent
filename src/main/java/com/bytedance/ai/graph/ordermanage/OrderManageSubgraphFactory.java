@@ -170,8 +170,10 @@ public class OrderManageSubgraphFactory {
         Map<String, Object> updates = new LinkedHashMap<>();
         CartView cart = cartQueryFacade.getActiveCart(userId, conversationId);
         if (cart == null || cart.items() == null || cart.items().isEmpty()) {
-            updates.put(OrderManageStateKeys.ORDER_STATUS, OrderManageStatus.FAILED.name());
-            updates.put(OrderManageStateKeys.NODE_MESSAGE, "你的购物车目前是空的，无法下单。");
+            // 空车不是“下单失败”，而是正常的前置提示：用非 error 终态（CANCELLED）让答案以普通文案返回，
+            // 避免 status=FAILED + ORDER_WORKFLOW_FAILED 把它当系统错误（#22 空车结算硬失败）。
+            updates.put(OrderManageStateKeys.ORDER_STATUS, OrderManageStatus.CANCELLED.name());
+            updates.put(OrderManageStateKeys.NODE_MESSAGE, "你的购物车目前是空的，先去挑几件加入购物车再来结算吧～");
             updates.put(OrderManageStateKeys.NEED_USER_INPUT, false);
             updates.put("orderLoadCartRoute", "EMPTY_CART");
             return updates;

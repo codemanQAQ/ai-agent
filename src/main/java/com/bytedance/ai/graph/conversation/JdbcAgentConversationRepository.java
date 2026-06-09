@@ -1,6 +1,5 @@
 package com.bytedance.ai.graph.conversation;
 
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -62,29 +61,35 @@ public class JdbcAgentConversationRepository implements AgentConversationReposit
             return existing.get();
         }
 
-        try {
-            KeyHolder keyHolder = new GeneratedKeyHolder();
-            jdbc.update(connection -> {
-                PreparedStatement statement = connection.prepareStatement(
-                        """
-                                INSERT INTO agent_conversations (conversation_id, user_id, status, message_count)
-                                VALUES (?, ?, 'ACTIVE', 0)
-                                """,
-                        new String[]{"id"}
-                );
-                statement.setString(1, conversationId);
-                statement.setString(2, userId);
-                return statement;
-            }, keyHolder);
+        // 用 ON CONFLICT DO NOTHING 做幂等插入：并发同会话两路同时插入时不抛唯一键异常、也不会
+        // abort 当前事务（旧实现 catch DuplicateKeyException 后在同一已 abort 的事务里再 SELECT 会
+        // 连环失败 → GUIDE_GRAPH_NODE_FAILED，即 #1/#22 竞态崩溃的根因）。冲突目标用现有
+        // 全局唯一键 conversation_id。
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        int inserted = jdbc.update(connection -> {
+            PreparedStatement statement = connection.prepareStatement(
+                    """
+                            INSERT INTO agent_conversations (conversation_id, user_id, status, message_count)
+                            VALUES (?, ?, 'ACTIVE', 0)
+                            ON CONFLICT (conversation_id) DO NOTHING
+                            """,
+                    new String[]{"id"}
+            );
+            statement.setString(1, conversationId);
+            statement.setString(2, userId);
+            return statement;
+        }, keyHolder);
+        if (inserted > 0) {
             Number key = keyHolder.getKey();
             if (key != null) {
                 return key.longValue();
             }
-        } catch (DuplicateKeyException ignored) {
-            // Another request created the row first; read it below.
         }
 
+        // 冲突未插入：先按 (user, conversation) 重查（并发同用户同会话→对方已插入的本人会话行）；
+        // 仍无则按 conversation_id 全局重查（跨用户复用同一 conversationId 的情况，#20：返回既有会话而非崩溃）。
         return findConversationInternalId(userId, conversationId)
+                .or(() -> findConversationInternalIdByConversation(conversationId))
                 .orElseThrow(() -> new IllegalStateException("agent conversation was not initialized"));
     }
 
@@ -145,7 +150,21 @@ public class JdbcAgentConversationRepository implements AgentConversationReposit
     ) {
         Long internalConversationId = findConversationInternalId(userId, conversationId)
                 .orElseGet(() -> initConversation(userId, conversationId));
-        int sequenceNo = nextSequenceNo(internalConversationId);
+        // 原子分配序号：用会话行计数器自增并 RETURNING 取值作为 sequence_no。UPDATE 持有该会话行的行锁，
+        // 把同一会话的并发写消息串行化，避免旧 “MAX(sequence_no)+1 先读后插” 的竞态（两路同序号 →
+        // 触发 uq_rag_messages_conversation_sequence 唯一键冲突 → 事务 abort → 节点失败，即 #1 残余崩溃）。
+        Integer sequenceNo = jdbc.queryForObject(
+                """
+                        UPDATE agent_conversations
+                           SET message_count = message_count + 1,
+                               last_message_at = CURRENT_TIMESTAMP,
+                               updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?
+                     RETURNING message_count
+                        """,
+                Integer.class,
+                internalConversationId
+        );
         String messageId = StringUtils.hasText(turnId)
                 ? turnId + ":" + role + ":" + UUID.randomUUID()
                 : UUID.randomUUID().toString();
@@ -163,17 +182,6 @@ public class JdbcAgentConversationRepository implements AgentConversationReposit
                 status,
                 correlationId,
                 sequenceNo
-        );
-
-        jdbc.update(
-                """
-                        UPDATE agent_conversations
-                           SET message_count = message_count + 1,
-                               last_message_at = CURRENT_TIMESTAMP,
-                               updated_at = CURRENT_TIMESTAMP
-                         WHERE id = ?
-                        """,
-                internalConversationId
         );
 
         return jdbc.query(
@@ -199,40 +207,26 @@ public class JdbcAgentConversationRepository implements AgentConversationReposit
             String targetWorkflow
     ) {
         String storedStatus = normalizeTurnStatus(status);
-        if (existsTurn(turnId)) {
-            jdbc.update(
-                    """
-                            UPDATE agent_turn
-                               SET request_id = ?,
-                                   user_id = ?,
-                                   conversation_id = ?,
-                                   status = ?,
-                                   intent = ?,
-                                   target_workflow = ?,
-                                   completed_at = CASE
-                                       WHEN ? IN ('SUCCEEDED', 'FAILED', 'WAITING_CLARIFICATION', 'WAITING_CONFIRMATION')
-                                       THEN CURRENT_TIMESTAMP
-                                       ELSE completed_at
-                                   END
-                             WHERE turn_id = ?
-                            """,
-                    requestId,
-                    userId,
-                    conversationId,
-                    storedStatus,
-                    intent,
-                    targetWorkflow,
-                    storedStatus,
-                    turnId
-            );
-            return;
-        }
-
+        // 单条 UPSERT 取代“先 exists 再 INSERT/UPDATE”：消除并发同 turn 的 TOCTOU 竞态——
+        // 旧写法两路都判不存在 → 双 INSERT → 唯一键冲突 abort 事务 → 后续节点连环失败（#22 填地址轮竞态）。
+        // 冲突目标 turn_id（已有唯一索引 agent_turn_turn_id_key）；冲突即按本轮最新状态更新。
         jdbc.update(
                 """
                         INSERT INTO agent_turn (
                             turn_id, request_id, conversation_id, user_id, status, intent, target_workflow
                         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (turn_id) DO UPDATE SET
+                            request_id = EXCLUDED.request_id,
+                            user_id = EXCLUDED.user_id,
+                            conversation_id = EXCLUDED.conversation_id,
+                            status = EXCLUDED.status,
+                            intent = EXCLUDED.intent,
+                            target_workflow = EXCLUDED.target_workflow,
+                            completed_at = CASE
+                                WHEN EXCLUDED.status IN ('SUCCEEDED', 'FAILED', 'WAITING_CLARIFICATION', 'WAITING_CONFIRMATION')
+                                THEN CURRENT_TIMESTAMP
+                                ELSE agent_turn.completed_at
+                            END
                         """,
                 turnId,
                 requestId,
@@ -268,26 +262,19 @@ public class JdbcAgentConversationRepository implements AgentConversationReposit
         ).stream().findFirst();
     }
 
-    private int nextSequenceNo(Long internalConversationId) {
-        Integer maxSequenceNo = jdbc.queryForObject(
+    /** 仅按 conversation_id 全局查（用于跨用户复用同一 conversationId 时的兜底，避免崩溃）。 */
+    private Optional<Long> findConversationInternalIdByConversation(String conversationId) {
+        return jdbc.query(
                 """
-                        SELECT COALESCE(MAX(sequence_no), 0)
-                          FROM agent_conversation_messages
+                        SELECT id
+                          FROM agent_conversations
                          WHERE conversation_id = ?
+                         ORDER BY id
+                         LIMIT 1
                         """,
-                Integer.class,
-                internalConversationId
-        );
-        return (maxSequenceNo == null ? 0 : maxSequenceNo) + 1;
-    }
-
-    private boolean existsTurn(String turnId) {
-        Integer count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM agent_turn WHERE turn_id = ?",
-                Integer.class,
-                turnId
-        );
-        return count != null && count > 0;
+                (rs, _) -> rs.getLong("id"),
+                conversationId
+        ).stream().findFirst();
     }
 
     private static OffsetDateTime toOffsetDateTime(Timestamp timestamp) {
