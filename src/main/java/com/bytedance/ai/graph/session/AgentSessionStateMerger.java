@@ -77,6 +77,9 @@ public final class AgentSessionStateMerger {
         Map<String, Object> accumulatedConstraints = accumulate
                 ? mergeNonEmpty(source.accumulatedConstraints(), positivePatch)
                 : mergeNonEmpty(null, positivePatch);
+        // 价格区间和解：本轮新给的边界若与累积里对立的旧边界冲突（下限>上限），以新边界为准、清掉旧的，
+        // 避免"先 3000 以内、又要 8000 以上"留下 priceMax=3000+priceMin=8000 的空区间(#10)。
+        accumulatedConstraints = reconcilePriceBounds(accumulatedConstraints, positivePatch);
         Map<String, Object> negativeConstraints = accumulate
                 ? mergeNonEmpty(source.negativeConstraints(), negativePatch)
                 : mergeNonEmpty(null, negativePatch);
@@ -116,6 +119,45 @@ public final class AgentSessionStateMerger {
      * 是否推荐链路意图（会产生/细化商品推荐）。购物车、下单、闲聊、澄清、政策问答等不属于此类，
      * 它们不应改写推荐上下文。未知意图按推荐处理（保守，仍走"未点名品类则继承"的逻辑）。
      */
+    /**
+     * 价格区间和解：当本轮 patch 新设了 priceMin/priceMax，且与累积里对立的旧边界构成无效区间（min>max）时，
+     * 删除冲突的旧边界（以本轮意图为准）。返回新的约束 map。
+     */
+    private Map<String, Object> reconcilePriceBounds(Map<String, Object> accumulated, Map<String, Object> patch) {
+        Double patchMin = number(patch.get("priceMin"));
+        Double patchMax = number(patch.get("priceMax"));
+        Double accMin = number(accumulated.get("priceMin"));
+        Double accMax = number(accumulated.get("priceMax"));
+        boolean dropMax = patchMin != null && accMax != null && accMax < patchMin; // 新下限高于旧上限 → 旧上限作废
+        boolean dropMin = patchMax != null && accMin != null && accMin > patchMax; // 新上限低于旧下限 → 旧下限作废
+        if (!dropMax && !dropMin) {
+            return accumulated;
+        }
+        Map<String, Object> result = new LinkedHashMap<>(accumulated);
+        if (dropMax) {
+            result.remove("priceMax");
+        }
+        if (dropMin) {
+            result.remove("priceMin");
+        }
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    private Double number(Object value) {
+        if (value instanceof Number n) {
+            return n.doubleValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            String s = String.valueOf(value).trim().replaceAll("[^0-9.]", "");
+            return s.isBlank() ? null : Double.parseDouble(s);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     private boolean isRecommendationIntent(String activeIntent) {
         if (activeIntent == null || activeIntent.isBlank()) {
             return false;
