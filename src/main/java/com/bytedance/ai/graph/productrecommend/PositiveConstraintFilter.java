@@ -139,27 +139,31 @@ public class PositiveConstraintFilter {
         if (!StringUtils.hasText(expectedText)) {
             return true;
         }
-        // 只按【叶子类目】（路径最后一段，即商品的具体品类）判定，不拿顶级类目参与匹配——
-        // 否则"运动裤"会因顶级"服饰运动"含 bigram"运动"而误命中所有 服饰运动 商品（T恤/卫衣等）。
         List<String> categoryPath = candidate.categoryPath();
+        String path = categoryPath == null ? "" : String.join("/", categoryPath);
         String leaf = categoryPath == null || categoryPath.isEmpty()
                 ? null : categoryPath.get(categoryPath.size() - 1);
-        if (!StringUtils.hasText(leaf)) {
+        if (!StringUtils.hasText(path)) {
             return containsIgnoreCase(candidate.title(), expectedText);
         }
-        // 1) 直接包含（手机 ⊂ 智能手机）
-        if (containsIgnoreCase(leaf, expectedText)) {
+        // 1) 子串匹配用【完整路径】：兼容顶级类目约束（"母婴用品" ⊂ "母婴用品/纸尿裤"）与
+        //    叶子子串（"手机" ⊂ "数码电子/智能手机"）。
+        if (containsIgnoreCase(path, expectedText)) {
             return true;
         }
-        // 2) bigram 重叠：兼容同义类目（蓝牙耳机 ~ 真无线耳机，共 耳机）
-        java.util.Set<String> have = ProductRecallTextTokenizer.tokens(leaf);
-        for (String term : ProductRecallTextTokenizer.tokens(expectedText)) {
-            if (term.length() >= 2 && have.contains(term)) {
-                return true;
+        // 2) bigram / 子序列只对【叶子类目】判定——避免顶级类目（如"服饰运动"含"运动"）把
+        //    "运动裤"误命中到全部服饰运动商品；同时兼容同义/缩略叶子：
+        //    蓝牙耳机 ~ 真无线耳机（共 耳机）、运动裤 ⊆ 运动长裤、跑鞋 ⊆ 跑步鞋。
+        if (StringUtils.hasText(leaf)) {
+            java.util.Set<String> have = ProductRecallTextTokenizer.tokens(leaf);
+            for (String term : ProductRecallTextTokenizer.tokens(expectedText)) {
+                if (term.length() >= 2 && have.contains(term)) {
+                    return true;
+                }
             }
+            return isCjkSubsequence(expectedText, leaf);
         }
-        // 3) CJK 子序列：兼容缩略类目（运动裤 ⊆ 运动长裤、跑鞋 ⊆ 跑步鞋、羽毛拍 ⊆ 羽毛球拍）
-        return isCjkSubsequence(expectedText, leaf);
+        return false;
     }
 
     /** needle 的汉字是否按顺序（可不连续）出现在 hay 中；少于 2 个汉字不参与（太宽松）。 */
